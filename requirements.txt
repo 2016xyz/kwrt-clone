@@ -1,0 +1,43 @@
+# kwrt-clone 运行依赖
+#
+# 为什么要有这个文件：此前项目**没有任何依赖清单**，部署环境只能靠
+# 「先跑起来，缺什么报错再装什么」——无法复现、无法审计供应链、
+# 也无法确定某个 CVE 是否影响本部署。
+#
+# 版本策略：下界 = 本次审计实际验证通过的版本；上界锁到下一个大版本，
+# 避免自动跨大版本（FastAPI/Starlette 的大版本常带破坏性变更）。
+# 需要完全可复现时用 requirements-lock.txt（精确 pin）。
+#
+# 国内环境安装：
+#   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# --- Web 框架 ---
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+# FastAPI 解析 application/x-www-form-urlencoded 与 multipart（登录、退款、上传）必需。
+# 缺失时表单接口会直接 422/500，且报错信息不直观。
+python-multipart>=0.0.9,<1.0
+# FastAPI 的 HTMLResponse/Jinja 模板（备用渲染路径）
+jinja2>=3.1,<4.0
+
+# --- 支付 ---
+# 支付宝 RSA2 签名/验签（app/pay.py）
+cryptography>=42.0,<52.0
+# 支付二维码：SVG 与 PNG 两种都只用这个库，**不引入 Pillow**。
+#
+# ★ 这里曾经撒过一个谎：注释写「不需要 Pillow」，但 app/pay.py 的
+#   qr_png_bytes() 实际走的是 qrcode 的默认工厂（PIL 实现）还调了 resize()，
+#   于是按本文件装出来的干净部署一访问 /api/v1/sponsor/pay/{订单}/qr.png
+#   就 ModuleNotFoundError: No module named 'PIL' → 线上 500，
+#   前端支付弹窗的 <img> 正是这个地址，等于「支付二维码永远出不来」。
+#   现已改为用 zlib+struct 自己拼 1 bit 调色板 PNG，依赖真实为 0。
+#   回归护栏：tools/verify_qr_png.py（含真解码闭环）、
+#             tools/verify_declared_deps.py（干净 venv 全量导入）
+qrcode>=7.4,<9.0
+
+# --- 说明 ---
+# 以下均为标准库，无外部依赖：
+#   urllib / sqlite3 / smtplib / hmac / hashlib / secrets / threading
+#
+# 可选（仅本地验证用，非运行时依赖）：
+#   playwright>=1.40          # tools/responsive_check.py 浏览器级校验

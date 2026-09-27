@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>找回密码 · {{site}}</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<div id="app" v-cloak>
+<div class="boot" v-if="!ready">
+  <div class="boot-spinner"></div>
+  <div class="fs-sm">正在加载…</div>
+</div>
+
+  <!-- ============ 页头 ============ -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="brand">
+        <span class="brand-text">{{ brand }}</span>
+      </a>
+      <span class="spacer"></span>
+      <div class="nav-links desktop">
+        <a class="nav-link" href="/">返回首页</a>
+        <a class="nav-link" href="/login/">登录</a>
+      </div>
+      <theme-toggle></theme-toggle>
+    </div>
+  </header>
+
+  <main id="main" class="container container-tight" style="padding-top:var(--sp-12);padding-bottom:var(--sp-12)">
+
+    <!-- ============ 第一步：申请重置 ============ -->
+    <div class="card card-pad-lg" v-if="step === 'request'">
+      <h3 class="text-center">找回密码</h3>
+      <p class="text-muted text-center mt-2 mb-5">
+        输入你的用户名或注册邮箱，我们会向该账号绑定的邮箱发送一封重置邮件。
+      </p>
+
+      <div class="stack-sm" style="max-width:380px;margin:0 auto">
+        <label class="label" for="acct">用户名或邮箱</label>
+        <input id="acct" class="input" v-model.trim="account" autocomplete="username"
+               placeholder="用户名 或 name@example.com" @keyup.enter="doRequest">
+
+        <template v-if="cap.needed">
+          <label class="label mt-3" for="cc">图形验证码</label>
+          <div class="input-group">
+            <input id="cc" class="input" v-model.trim="cap.code" autocomplete="off"
+                   placeholder="请输入图中字符" maxlength="6" @keyup.enter="doRequest">
+            <button type="button" class="captcha-btn" @click="loadCaptcha"
+                    aria-label="看不清，换一张">
+              <span class="captcha-svg" v-html="cap.svg" v-if="cap.svg"></span>
+              <span class="muted sm" v-else>加载中…</span>
+            </button>
+          </div>
+        </template>
+
+        <button class="btn btn-primary btn-lg btn-block mt-4"
+                :class="{ 'is-loading': busy }"
+                :disabled="busy || !account" @click="doRequest">发送重置邮件</button>
+
+        <p class="field-hint text-center">
+          为保护账号，无论该账号是否存在，我们都会返回同样的提示。
+        </p>
+        <p class="text-center mt-3">
+          <a href="/login/" class="link">想起来了？返回登录</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- ============ 已发送 ============ -->
+    <div class="card card-pad-lg text-center" v-else-if="step === 'sent'">
+      <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4);color:var(--s-success)">
+        <svg viewBox="0 0 24 24" width="62" height="62" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.8" y="5" width="18.4" height="14" rx="2.2"/><path d="M3.4 6.6L12 13l8.6-6.4"/>
+        </svg>
+      </div>
+      <h3>{{ sentTitle }}</h3>
+      <p class="text-muted mt-3">{{ sentDetail }}</p>
+
+      <div class="alert alert-info mt-6 text-left">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+        <div class="alert-bd">
+          <div class="alert-title">没收到邮件？</div>
+          请检查垃圾邮件目录；确认账号绑定的邮箱是否正确；
+          链接有有效期，过期后可在下方重新申请。
+        </div>
+      </div>
+
+      <div class="stack-sm mt-6" style="max-width:320px;margin:0 auto">
+        <button class="btn btn-outline btn-block" @click="step = 'request'">重新申请</button>
+        <a class="btn btn-outline btn-block" href="/login/">返回登录</a>
+      </div>
+    </div>
+
+    <!-- ============ 第二步：设置新密码 ============ -->
+    <div class="card card-pad-lg" v-else-if="step === 'setpw'">
+      <h3 class="text-center">设置新密码</h3>
+      <p class="text-muted text-center mt-2 mb-5">
+        正在为账号 <b class="text-primary">{{ username }}</b> 设置新密码。
+        设置成功后，该账号在其它设备上的登录状态会被全部注销。
+      </p>
+
+      <div class="stack-sm" style="max-width:380px;margin:0 auto">
+        <label class="label" for="p1">新密码</label>
+        <div class="input-group">
+          <input id="p1" class="input" :type="showPw ? 'text' : 'password'" v-model="pw1"
+                 autocomplete="new-password" placeholder="至少 6 位" @keyup.enter="doSubmit">
+          <button type="button" class="btn btn-outline" @click="showPw = !showPw"
+                  :aria-label="showPw ? '隐藏密码' : '显示密码'">
+            <svg v-if="!showPw" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l18 18M10.6 10.7a3 3 0 0 0 4.2 4.2"/><path d="M6.5 6.6C3.9 8.4 2.5 12 2.5 12S6 18.2 12 18.2c2.2 0 4-.8 5.4-1.8M17.5 15.4c2.3-1.8 4-3.4 4-3.4S18 5.8 12 5.8c-.9 0-1.7.1-2.4.4"/></svg>
+          </button>
+        </div>
+
+        <label class="label mt-3" for="p2">确认新密码</label>
+        <input id="p2" class="input" :type="showPw ? 'text' : 'password'" v-model="pw2"
+               autocomplete="new-password" placeholder="再输一次" @keyup.enter="doSubmit">
+
+        <div class="alert alert-danger mt-3" v-if="pwErr">{{ pwErr }}</div>
+
+        <button class="btn btn-primary btn-lg btn-block mt-4"
+                :class="{ 'is-loading': busy }"
+                :disabled="busy || !pw1 || !pw2" @click="doSubmit">设置新密码并登录</button>
+      </div>
+    </div>
+
+    <!-- ============ 失败 / 无效链接 ============ -->
+    <div class="card card-pad-lg text-center" v-else-if="step === 'bad'">
+      <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4);color:var(--s-danger)">
+        <svg viewBox="0 0 24 24" width="62" height="62" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9.5"/><path d="M12 7.6v5.2M12 16.3h.01"/>
+        </svg>
+      </div>
+      <h3>{{ badTitle }}</h3>
+      <p class="text-muted mt-3">{{ badDetail }}</p>
+      <div class="stack-sm mt-6" style="max-width:300px;margin-left:auto;margin-right:auto">
+        <button class="btn btn-primary btn-block" @click="restart">重新申请重置</button>
+        <a class="btn btn-outline btn-block" href="/login/">返回登录</a>
+      </div>
+    </div>
+
+    <!-- ============ 完成 ============ -->
+    <div class="card card-pad-lg text-center" v-else>
+      <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4);color:var(--s-success)">
+        <svg viewBox="0 0 24 24" width="62" height="62" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9.5"/><path d="M8.2 12.4l2.6 2.6 5-5.4"/>
+        </svg>
+      </div>
+      <h3>密码已重置</h3>
+      <p class="text-muted mt-3">
+        账号 <b class="text-primary">{{ username }}</b> 的新密码已生效，你已自动登录。
+      </p>
+      <div class="stack-sm mt-6" style="max-width:300px;margin-left:auto;margin-right:auto">
+        <a class="btn btn-primary btn-block" href="/">开始使用</a>
+        <a class="btn btn-outline btn-block" href="/login/">前往登录页</a>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:0;padding-top:0">
+        <span>© {{ year }} {{ site.site_name || brand }}</span>
+        <span v-if="site.icp_text">{{ site.icp_text }}</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/jquery.min.js"></script>
+<script src="/assets/js/common.js"></script>
+<script>
+(function () {
+  const { createApp, ref, onMounted } = Vue;
+
+  const app = createApp({
+    setup() {
+      const ready = ref(false);
+      const step = ref('request');        // request | sent | setpw | bad | done
+      const site = ref({});
+      const year = new Date().getFullYear();
+
+      const account = ref('');
+      const token = ref('');
+      const username = ref('');
+      const pw1 = ref('');
+      const pw2 = ref('');
+      const pwErr = ref('');
+      const showPw = ref(false);
+      const busy = ref(false);
+
+      const cap = ref({ needed: false, id: '', svg: '', code: '' });
+      const sentTitle = ref('重置邮件已发送');
+      const sentDetail = ref('');
+      const badTitle = ref('链接无效');
+      const badDetail = ref('');
+
+      const brand = Vue.computed(() => site.value.site_short || site.value.site_name || '本站');
+
+      async function loadCaptcha() {
+        try {
+          const c = await K.api('/api/v1/captcha');
+          cap.value.id = c.id; cap.value.svg = c.svg;
+        } catch (e) { cap.value.needed = false; }
+      }
+
+      function restart() {
+        token.value = '';
+        pw1.value = ''; pw2.value = ''; pwErr.value = '';
+        badTitle.value = '链接无效'; badDetail.value = '';
+        step.value = 'request';
+        if (cap.value.needed) loadCaptcha();
+      }
+
+      async function doRequest() {
+        if (!account.value || busy.value) return;
+        busy.value = true;
+        try {
+          const r = await K.postForm('/api/v1/reset_request', {
+            account: account.value,
+            captcha_id: cap.value.id || '',
+            captcha_code: cap.value.code || '',
+          });
+          sentTitle.value = '重置邮件已发送';
+          sentDetail.value = r.message || '如果该账号存在且已绑定邮箱，重置邮件已经发出。';
+          step.value = 'sent';
+        } catch (e) {
+          K.toast(e.message || '请求失败', 'error');
+          if (cap.value.needed) { cap.value.code = ''; loadCaptcha(); }
+        } finally {
+          busy.value = false;
+        }
+      }
+
+      async function doSubmit() {
+        if (busy.value) return;
+        pwErr.value = '';
+        if (pw1.value.length < 6) { pwErr.value = '密码至少 6 位'; return; }
+        if (pw1.value !== pw2.value) { pwErr.value = '两次输入的密码不一致'; return; }
+        busy.value = true;
+        try {
+          const r = await K.postForm('/api/v1/reset_confirm', {
+            token: token.value, password: pw1.value,
+          });
+          username.value = r.username || username.value;
+          step.value = 'done';
+          document.title = '密码已重置 · ' + brand.value;
+        } catch (e) {
+          const msg = (e && e.message) || '重置失败';
+          pwErr.value = msg;
+          // 令牌类错误（过期/已用/无效）直接切到失败态，别让用户白填
+          if (/过期|已被使用|无效|不正确/.test(msg)) {
+            badTitle.value = msg.indexOf('过期') >= 0 ? '链接已过期'
+                          : msg.indexOf('已被使用') >= 0 ? '这个链接已经用过了' : '链接无效';
+            badDetail.value = msg;
+            step.value = 'bad';
+          }
+        } finally {
+          busy.value = false;
+        }
+      }
+
+      onMounted(async () => {
+        try { site.value = await K.api('/api/v1/site'); } catch (e) { }
+
+        cap.value.needed = !!((site.value.captcha || {}).reset);
+        if (cap.value.needed) loadCaptcha();
+
+        token.value = new URLSearchParams(location.search).get('token') || '';
+        if (!token.value) { ready.value = true; return; }
+
+        // 带了令牌：先校验一次，好让用户知道在为哪个账号改密码
+        try {
+          const r = await K.postForm('/api/v1/reset_check', { token: token.value });
+          username.value = r.username || '';
+          step.value = 'setpw';
+          document.title = '设置新密码 · ' + brand.value;
+        } catch (e) {
+          const msg = (e && e.message) || '链接无效';
+          badTitle.value = msg.indexOf('过期') >= 0 ? '链接已过期'
+                        : msg.indexOf('已被使用') >= 0 ? '这个链接已经用过了' : '链接无效';
+          badDetail.value = msg;
+          step.value = 'bad';
+        } finally {
+          ready.value = true;
+        }
+      });
+
+      return { ready, step, site, year, brand, account, token, username,
+               pw1, pw2, pwErr, showPw, busy, cap, sentTitle, sentDetail,
+               badTitle, badDetail, loadCaptcha, restart, doRequest, doSubmit };
+    }
+  });
+
+  app.mount('#app');
+})();
+</script>
+</body>
+</html>

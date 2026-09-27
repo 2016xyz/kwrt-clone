@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>账户 · 夏诗意</title>
+<meta name="description" content="登录或注册夏诗意账号，解锁固件定制高级选项。">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+<div id="app" v-cloak>
+
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+        <span class="brand-text">{{ site.site_short || '夏诗意' }}</span>
+      </a>
+      <span class="spacer"></span>
+      <nav class="nav-links desktop">
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/packages/">软件库</a>
+        <a class="nav-link" href="/newpkg/">插件提议</a>
+        <a class="nav-link" href="/fadian/">为爱发电</a>
+        <a class="nav-link" href="/contact/">联系</a>
+      </nav>
+      <theme-toggle></theme-toggle>
+      <button class="burger" @click="menu = true" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <template v-if="menu">
+    <div class="drawer-mask" @click="menu = false"></div>
+    <aside class="drawer" role="dialog" aria-label="导航菜单">
+      <div class="row-between mb-4">
+        <b>{{ site.site_short || '夏诗意' }}</b>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="menu = false" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <a class="nav-link" href="/" @click="menu = false">首页</a>
+      <a class="nav-link" href="/packages/" @click="menu = false">软件库</a>
+      <a class="nav-link" href="/newpkg/" @click="menu = false">插件提议</a>
+      <div class="divider"></div>
+      <a class="nav-link" href="/admin/" v-if="user.is_admin" @click="menu = false">管理后台</a>
+    </aside>
+  </template>
+
+  <main id="main" class="container" style="padding-top:var(--sp-8);padding-bottom:var(--sp-12)">
+    <div class="grid grid-2" style="gap:var(--sp-8);align-items:start">
+
+      <!-- ============ 左：账户 ============ -->
+      <div class="card card-pad-lg">
+        <!-- 已登录 -->
+        <template v-if="user.logged_in">
+          <div class="row-between mb-5">
+            <div>
+              <h3 style="margin-bottom:4px">你好，{{ user.username }}</h3>
+              <div class="cluster-sm">
+                <span class="badge" :class="user.is_admin ? 'badge-danger' : 'badge-primary'">
+                  {{ user.is_admin ? '管理员' : '普通用户' }}
+                </span>
+                <span class="badge badge-accent" v-if="user.sponsor">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/></svg>
+                  {{ user.sponsor_tier || '赞助用户' }}
+                </span>
+                <span class="badge" v-else>未赞助</span>
+              </div>
+            </div>
+            <a class="btn btn-outline btn-sm" href="/admin/" v-if="user.is_admin">管理后台</a>
+          </div>
+
+          <div class="grid grid-2" style="gap:var(--sp-3)">
+            <div class="kpi">
+              <div class="kpi-label">插件配额</div>
+              <div class="kpi-value">{{ user.sponsor ? '不限' : (site.default_quota || 12) }}</div>
+              <div class="kpi-sub">{{ user.sponsor ? '赞助用户不限制插件数量' : '个 luci-app' }}</div>
+            </div>
+            <div class="kpi" :class="user.sponsor ? 'kpi-accent' : ''">
+              <div class="kpi-label">赞助有效期</div>
+              <div class="kpi-value fs-xl" style="line-height:1.5">
+                {{ user.sponsor && user.sponsor_until ? untilText : '—' }}
+              </div>
+              <div class="kpi-sub">{{ user.sponsor ? '到期后自动恢复普通权限' : '赞助后解锁全部定制项' }}</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="stack-sm">
+            <a class="btn btn-primary btn-block" href="/">开始定制固件</a>
+            <a class="btn btn-ghost btn-block" href="/api/v1/downloads" @click.prevent="openDownloads">
+              我的下载链接
+            </a>
+            <button class="btn btn-ghost btn-block" @click="doLogout">退出登录</button>
+          </div>
+        </template>
+
+        <!-- 未登录 -->
+        <template v-else>
+          <div class="segmented mb-5" style="display:flex">
+            <button style="flex:1" :class="{ on: tab === 'login' }" @click="switchTab('login')">登录</button>
+            <button style="flex:1" :class="{ on: tab === 'reg' }" @click="switchTab('reg')">注册</button>
+          </div>
+
+          <!-- 登录 -->
+          <form v-if="tab === 'login'" class="stack" @submit.prevent="doLogin">
+            <div class="field">
+              <label class="field-label" for="lu">用户名</label>
+              <input id="lu" class="input" v-model.trim="lf.username" autocomplete="username"
+                     placeholder="请输入用户名" required>
+            </div>
+            <div class="field">
+              <label class="field-label" for="lp">密码</label>
+              <div class="input-group">
+                <input id="lp" class="input" :type="showPw ? 'text' : 'password'" v-model="lf.password"
+                       autocomplete="current-password" placeholder="请输入密码" required>
+                <button type="button" class="btn btn-outline" @click="showPw = !showPw"
+                        :aria-label="showPw ? '隐藏密码' : '显示密码'">
+                  <svg v-if="!showPw" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <svg v-else viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l18 18M10.6 10.7a3 3 0 0 0 4.2 4.2"/><path d="M6.5 6.6C3.9 8.4 2.5 12 2.5 12S6 18.2 12 18.2c2.2 0 4-.8 5.4-1.8M17.5 15.4c2.3-1.8 4-3.4 4-3.4S18 5.8 12 5.8c-.9 0-1.7.1-2.4.4"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="field" v-if="capLogin.on">
+              <label class="field-label" for="lc">验证码</label>
+              <div class="input-group">
+                <input id="lc" class="input" v-model.trim="lf.captcha" autocomplete="off"
+                       placeholder="请输入图中字符" maxlength="6" required>
+                <button type="button" class="captcha-btn" @click="loadCaptcha('login')"
+                        :aria-label="'看不清，换一张'">
+                  <span class="captcha-svg" v-html="capLogin.svg"
+                        v-if="capLogin.svg"></span>
+                  <span class="muted sm" v-else>加载中…</span>
+                </button>
+              </div>
+              <span class="field-hint">看不清？点击图片换一张（{{ capLogin.length }} 位，不区分大小写）</span>
+            </div>
+
+            <div class="alert alert-warning" v-if="loginNeedsVerify">
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+              <div class="alert-bd">
+                <div class="alert-title">邮箱尚未验证</div>
+                需要先完成邮箱验证才能登录。
+                <div class="mt-3">
+                  <button type="button" class="btn btn-sm btn-primary" :class="{ 'is-loading': resending }"
+                          :disabled="resending" @click="doResend">重新发送验证邮件</button>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-lg btn-block" :class="{ 'is-loading': busy.login }"
+                    :disabled="busy.login">登录</button>
+            <p class="field-hint text-center">
+              还没有账号？<a href="#" @click.prevent="switchTab('reg')">去注册</a>
+              <!-- 找回密码入口：受 page.reset_enabled 开关控制。
+                   该键在 settings 里关闭时 /reset/ 也一并不可用（netcfg.PAGE_SWITCHES），
+                   所以这里隐藏只是避免死链，真正的门在服务端。 -->
+              <template v-if="resetEnabled">
+                <span class="muted"> · </span>
+                <a href="/reset/">忘记密码？</a>
+              </template>
+            </p>
+          </form>
+
+          <!-- 注册 -->
+          <form v-else class="stack" @submit.prevent="doReg">
+            <div class="field">
+              <label class="field-label" for="ru">用户名 <span class="req">*</span></label>
+              <input id="ru" class="input" v-model.trim="rf.username" autocomplete="username"
+                     placeholder="3-32 位字母、数字、._-" required>
+              <span class="field-hint">仅允许字母、数字、下划线、点、连字符</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="re">
+                邮箱
+                <span class="badge badge-danger" v-if="needVerify">必填</span>
+                <span class="badge" v-else>选填</span>
+              </label>
+              <input id="re" class="input" type="email" v-model.trim="rf.email"
+                     autocomplete="email" :required="needVerify"
+                     :placeholder="needVerify ? '用于接收验证邮件' : '选填，用于接收构建完成通知'">
+              <span class="field-hint" v-if="needVerify">
+                本站已开启邮箱验证，提交后我们会向该邮箱发送验证链接。
+              </span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="rp">密码 <span class="req">*</span></label>
+              <input id="rp" class="input" type="password" v-model="rf.password"
+                     autocomplete="new-password" placeholder="至少 6 位" required>
+            </div>
+            <div class="field">
+              <label class="field-label" for="rp2">确认密码 <span class="req">*</span></label>
+              <input id="rp2" class="input" type="password" v-model="rf.password2"
+                     autocomplete="new-password" placeholder="再次输入密码" required>
+              <span class="field-err" v-if="rf.password2 && rf.password !== rf.password2">两次输入的密码不一致</span>
+            </div>
+
+            <div class="alert alert-info" v-if="needVerify">
+              <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 7l9 6 9-6"/></svg></span>
+              <div class="alert-bd">注册后需前往邮箱点击验证链接才能登录。链接 {{
+                site['mail.verify_ttl_hours'] || 24 }} 小时内有效。</div>
+            </div>
+
+            <div class="field" v-if="capReg.on">
+              <label class="field-label" for="rc">验证码</label>
+              <div class="input-group">
+                <input id="rc" class="input" v-model.trim="rf.captcha" autocomplete="off"
+                       placeholder="请输入图中字符" maxlength="6" required>
+                <button type="button" class="captcha-btn" @click="loadCaptcha('register')"
+                        :aria-label="'看不清，换一张'">
+                  <span class="captcha-svg" v-html="capReg.svg" v-if="capReg.svg"></span>
+                  <span class="muted sm" v-else>加载中…</span>
+                </button>
+              </div>
+              <span class="field-hint">看不清？点击图片换一张（{{ capReg.length }} 位，不区分大小写）</span>
+            </div>
+
+            <button class="btn btn-primary btn-lg btn-block" :class="{ 'is-loading': busy.reg }"
+                    :disabled="busy.reg || (rf.password2 && rf.password !== rf.password2)">注册</button>
+            <p class="field-hint text-center">
+              已有账号？<a href="#" @click.prevent="switchTab('login')">去登录</a>
+            </p>
+          </form>
+        </template>
+
+        <!-- 注册后待验证 -->
+        <div v-if="pending" class="text-center" style="padding:var(--sp-4) 0">
+          <div style="display:flex;justify-content:center;margin-bottom:var(--sp-3);color:var(--primary)">
+            <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 7l9 6 9-6"/>
+            </svg>
+          </div>
+          <h4>验证邮件已发送</h4>
+          <p class="text-muted fs-sm mt-2">
+            我们已向 <b class="text-primary">{{ pending.email }}</b> 发送了验证链接，<br>
+            请点击邮件中的链接完成注册。
+          </p>
+          <div class="stack-sm mt-5" style="max-width:280px;margin-left:auto;margin-right:auto">
+            <button class="btn btn-outline btn-block" :class="{ 'is-loading': resending }"
+                    :disabled="resending" @click="doResend">重新发送</button>
+            <button class="btn btn-ghost btn-block" @click="pending = null; tab = 'login'">返回登录</button>
+          </div>
+          <p class="field-hint mt-4">没收到？请检查垃圾邮件目录。</p>
+        </div>
+      </div>
+
+      <!-- ============ 右：赞助 ============ -->
+      <div class="card card-pad-lg">
+        <div class="section-title" style="font-size:var(--fs-lg)">
+          <span class="num">$</span> 赞助支持
+        </div>
+        <p class="section-desc mb-4">
+          赞助完全自愿。赞助后解锁全部定制选项并享受 VIP 构建通道。
+        </p>
+
+        <div class="alert alert-info mb-4" style="display:block">
+          <b class="text-primary">当前状态：</b>
+          <template v-if="user.logged_in">
+            <template v-if="user.sponsor">
+              赞助中 · {{ user.sponsor_tier || '赞助用户' }}
+              <template v-if="user.sponsor_until">，{{ untilText }} 到期</template>
+            </template>
+            <template v-else>未赞助（受插件数量限制）</template>
+          </template>
+          <template v-else>未登录，<a href="#" @click.prevent="switchTab('login')">登录</a>后可赞助</template>
+        </div>
+
+        <div class="tier-grid" v-if="tiers.length">
+          <button v-for="t in tiers" :key="t.name" class="tier"
+                  :class="{ on: chosen === t.name }" @click="chosen = t.name">
+            <div class="tier-name">{{ t.name }}</div>
+            <div class="tier-amount">{{ sym }}{{ t.amount }}<span> / {{ t.days }} 天</span></div>
+            <ul class="tier-perks">
+              <li v-for="p in t.perks" :key="p">{{ p }}</li>
+            </ul>
+          </button>
+        </div>
+        <div class="empty" v-else>
+          <p>管理员尚未配置赞助套餐。</p>
+        </div>
+
+        <div class="stack-sm mt-5">
+          <button class="btn btn-accent btn-lg btn-block"
+                  v-if="pay.available" :disabled="!chosen || paying"
+                  :class="{ 'is-loading': paying }" @click="startPay">
+            支付宝扫码支付
+          </button>
+          <button class="btn btn-primary btn-lg btn-block"
+                  v-else-if="site['sponsor.enabled']" :disabled="!chosen"
+                  :class="{ 'is-loading': busy.claim }" @click="doClaim">
+            我已完成赞助，提交确认
+          </button>
+          <p class="field-hint text-center" v-if="!pay.available && site['sponsor.enabled']">
+            站点未开启在线支付，请按下方说明完成赞助后回来确认。
+          </p>
+        </div>
+
+        <div class="alert alert-warning mt-4" v-if="site['sponsor.note']" style="display:block">
+          {{ site['sponsor.note'] }}
+        </div>
+        <p class="field-hint mt-3" v-if="site['sponsor.contact']">{{ site['sponsor.contact'] }}</p>
+      </div>
+    </div>
+
+    <!-- 我的下载链接 -->
+    <div class="card mt-6" v-if="showDl">
+      <div class="card-hd">
+        <h4>我的下载链接</h4>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-sm" @click="showDl = false">收起</button>
+      </div>
+      <div v-if="dls.length" class="table-wrap">
+        <div class="table-scroll">
+          <table class="table table-responsive">
+            <thead><tr><th>文件</th><th>剩余有效期</th><th class="num">大小</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="d in dls" :key="d.token || d.filename">
+                <td data-label="文件" class="truncate" style="max-width:280px">{{ d.filename }}</td>
+                <td data-label="剩余有效期">
+                  <span class="badge" :class="d.remaining_hours < 6 ? 'badge-warning' : 'badge-success'">
+                    {{ d.remaining_hours }} 小时
+                  </span>
+                </td>
+                <td data-label="大小" class="num">{{ K.bytes(d.size) }}</td>
+                <td class="actions">
+                  <a class="btn btn-sm btn-outline" :href="'/dl/t/' + d.token">下载</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="empty" v-else><p>暂无有效下载链接。</p></div>
+    </div>
+  </main>
+
+  <!-- ============ 支付宝扫码弹窗 ============ -->
+  <div class="modal-mask" v-if="order" @click.self="cancelOrder">
+    <div class="modal modal-sm">
+      <div class="modal-hd">
+        <h3>支付宝扫码支付</h3>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="cancelOrder" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-bd">
+        <div class="qr-panel">
+          <div class="qr-frame">
+            <img :src="order.qr_img" :alt="'支付宝支付二维码 ' + order.out_trade_no">
+          </div>
+          <div class="qr-meta">
+            <div class="qr-amount">{{ sym }}{{ order.amount }}<small> / {{ order.days }} 天</small></div>
+            <div class="qr-status">
+              <span class="badge badge-dot badge-pulse badge-warning" v-if="order.state === 'waiting'">
+                等待支付
+              </span>
+              <span class="badge badge-dot badge-success" v-else-if="order.state === 'paid'">支付成功</span>
+              <span class="badge badge-dot badge-danger" v-else-if="order.state === 'expired'">订单已超时</span>
+              <span class="badge badge-dot" v-else>{{ order.state }}</span>
+              <span v-if="order.state === 'waiting'" class="text-faint">
+                剩余 {{ order.leftText }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert alert-info mt-4" style="display:block">
+          请用<b>支付宝</b>扫描上方二维码完成支付。<br>
+          支付成功后本页面会<b>自动刷新</b>，无需手动确认。
+        </div>
+        <div class="alert alert-success mt-4" style="display:block" v-if="order.state === 'paid'">
+          {{ order.detail || '支付成功，赞助权益已生效。' }}
+        </div>
+        <p class="field-hint mt-3 text-center break-all">订单号：{{ order.out_trade_no }}</p>
+      </div>
+      <div class="modal-ft">
+        <button class="btn btn-outline" @click="cancelOrder">
+          {{ order.state === 'paid' ? '完成' : '取消订单' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-moat mb-5" v-if="site.footer_moat_title">
+        <h4>{{ site.footer_moat_title }}</h4>
+        <p>{{ site.footer_moat_text }}</p>
+      </div>
+      <div class="footer-bottom" style="margin-top:0;border-top:0;padding-top:0">
+        <span>© {{ year }} {{ site.site_name || site.site_short || '夏诗意' }} · 保留所有权利</span>
+        <span v-if="site.icp_text">{{ site.icp_text }}</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/jquery.min.js"></script>
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/login.js"></script>
+</body>
+</html>

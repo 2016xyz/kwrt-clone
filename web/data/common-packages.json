@@ -1,0 +1,557 @@
+[
+ {
+  "name": "luci-app-accesscontrol-plus",
+  "desc": "访问控制",
+  "big": false
+ },
+ {
+  "name": "luci-app-acme",
+  "desc": "https证书申请",
+  "big": false
+ },
+ {
+  "name": "luci-app-adbyby-plus",
+  "desc": "adbyby去广告",
+  "big": false
+ },
+ {
+  "name": "luci-app-adguardhome",
+  "desc": "ADG去广告",
+  "big": true
+ },
+ {
+  "name": "luci-app-airplay2",
+  "desc": "Airplay2音箱",
+  "big": false
+ },
+ {
+  "name": "luci-app-aliyundrive-webdav",
+  "desc": "阿里云盘WebDAV",
+  "big": false
+ },
+ {
+  "name": "luci-app-ap-modem",
+  "desc": "访问AP/光猫",
+  "big": false
+ },
+ {
+  "name": "luci-app-aria2",
+  "desc": "Aria2下载工具",
+  "big": false
+ },
+ {
+  "name": "luci-app-arpbind",
+  "desc": "ARP绑定",
+  "big": false
+ },
+ {
+  "name": "luci-app-bandix",
+  "desc": "流量监控限速",
+  "big": false
+ },
+ {
+  "name": "luci-app-broadbandacc",
+  "desc": "宽带提速",
+  "big": false
+ },
+ {
+  "name": "luci-app-cifs-mount",
+  "desc": "共享盘挂载",
+  "big": false
+ },
+ {
+  "name": "luci-app-clouddrive2",
+  "desc": "多云盘管理工具",
+  "big": false
+ },
+ {
+  "name": "luci-app-cpulimit",
+  "desc": "CPU占用率限制",
+  "big": false
+ },
+ {
+  "name": "luci-app-cloudreve",
+  "desc": "多存储网盘",
+  "big": true
+ },
+ {
+  "name": "luci-app-cupsd",
+  "desc": "CUPS打印服务",
+  "big": false
+ },
+ {
+  "name": "luci-app-ddns",
+  "desc": "动态域名解析",
+  "big": false
+ },
+ {
+  "name": "luci-app-ddns-go",
+  "desc": "动态域名解析",
+  "big": false
+ },
+ {
+  "name": "luci-app-ddnsto",
+  "desc": "内网穿透",
+  "big": false
+ },
+ {
+  "name": "luci-app-diskman",
+  "desc": "磁盘管理",
+  "big": false
+ },
+ {
+  "name": "luci-app-dufs",
+  "desc": "支持WebDAV的文件管理",
+  "big": false
+ },
+ {
+  "name": "luci-app-easymesh",
+  "desc": "Mesh组网",
+  "big": false
+ },
+ {
+  "name": "luci-app-easytier",
+  "desc": "异地组网",
+  "big": false
+ },
+ {
+  "name": "luci-app-eqosplus",
+  "desc": "IP限速",
+  "big": false
+ },
+ {
+  "name": "luci-app-filebrowser-q",
+  "desc": "文件网盘管理",
+  "big": false
+ },
+ {
+  "name": "luci-app-frpc",
+  "desc": "内网穿透",
+  "big": false
+ },
+ {
+  "name": "luci-app-frps",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-guest-wifi",
+  "desc": "访客WIFI",
+  "big": false
+ },
+ {
+  "name": "luci-app-hd-idle",
+  "desc": "硬盘休眠",
+  "big": false
+ },
+ {
+  "name": "luci-app-homeassistant",
+  "desc": "智能家居",
+  "big": true
+ },
+ {
+  "name": "luci-app-ipsec-server",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-iptvhelper",
+  "desc": "IPTV助手",
+  "big": false
+ },
+ {
+  "name": "luci-app-kodexplorer",
+  "desc": "可道云网盘",
+  "big": true
+ },
+ {
+  "name": "luci-app-ksmbd",
+  "desc": "内核级文件共享",
+  "big": false
+ },
+ {
+  "name": "luci-app-linkease",
+  "desc": "易有云文件管理",
+  "big": false
+ },
+ {
+  "name": "luci-app-lucky",
+  "desc": "Lucy多功能网络工具",
+  "big": false
+ },
+ {
+  "name": "luci-app-minidlna",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-mosdns",
+  "desc": "DNS转发",
+  "big": false
+ },
+ {
+  "name": "luci-app-msd_lite",
+  "desc": "IPTV组播",
+  "big": false
+ },
+ {
+  "name": "luci-app-mwan3-nft",
+  "desc": "负载均衡",
+  "big": false
+ },
+ {
+  "name": "luci-app-natmap",
+  "desc": "内网穿透",
+  "big": false
+ },
+ {
+  "name": "luci-app-nft-timecontrol",
+  "desc": "上网时间控制",
+  "big": false
+ },
+ {
+  "name": "luci-app-npc",
+  "desc": "NPS内网穿透客户端",
+  "big": false
+ },
+ {
+  "name": "luci-app-netdata",
+  "desc": "性能监测",
+  "big": true
+ },
+ {
+  "name": "luci-app-fastnet",
+  "desc": "网络体检/测速",
+  "big": false
+ },
+ {
+  "name": "luci-app-nlbwmon",
+  "desc": "流量统计",
+  "big": false
+ },
+ {
+  "name": "luci-app-oaf",
+  "desc": "应用过滤",
+  "big": false
+ },
+ {
+  "name": "luci-app-openclaw",
+  "desc": "OpenClaw AI",
+  "big": true
+ },
+ {
+  "name": "luci-app-openlist2",
+  "desc": "原alist 多存储文件列表",
+  "big": false
+ },
+ {
+  "name": "luci-app-openvpn-server-client",
+  "desc": "OpenVPN服务器",
+  "big": false
+ },
+ {
+  "name": "luci-app-p910nd",
+  "desc": "USB打印机",
+  "big": false
+ },
+ {
+  "name": "luci-app-parentcontrol",
+  "desc": "家长控制",
+  "big": false
+ },
+ {
+  "name": "luci-app-partexp",
+  "desc": "分区扩容",
+  "big": false
+ },
+ {
+  "name": "luci-app-qbittorrent",
+  "desc": "BT下载工具",
+  "big": false
+ },
+ {
+  "name": "luci-app-qosmate",
+  "desc": "Qos流量控制",
+  "big": false
+ },
+ {
+  "name": "luci-app-quickfile",
+  "desc": "文件管理器",
+  "big": false
+ },
+ {
+  "name": "luci-app-rclone",
+  "desc": "云盘挂载同步",
+  "big": false
+ },
+ {
+  "name": "luci-app-run",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-samba4",
+  "desc": "samba文件共享",
+  "big": false
+ },
+ {
+  "name": "luci-app-smartdns",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-snmpd",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-socat",
+  "desc": "端口转发",
+  "big": false
+ },
+ {
+  "name": "luci-app-softethervpn",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-sqm-autorate",
+  "desc": "Qos流量控制",
+  "big": false
+ },
+ {
+  "name": "luci-app-statistics",
+  "desc": "collectd系统监控统计",
+  "big": false
+ },
+ {
+  "name": "luci-app-subconverter",
+  "desc": "订阅转换",
+  "big": false
+ },
+ {
+  "name": "luci-app-syncdial",
+  "desc": "多拨",
+  "big": false
+ },
+ {
+  "name": "luci-app-tailscale-community",
+  "desc": "Tailscale虚拟组网",
+  "big": false
+ },
+ {
+  "name": "luci-app-taskplan",
+  "desc": "定时/开机任务",
+  "big": false
+ },
+ {
+  "name": "luci-app-thunder",
+  "desc": "迅雷下载",
+  "big": false
+ },
+ {
+  "name": "luci-app-timedreboot",
+  "desc": "定时重启",
+  "big": false
+ },
+ {
+  "name": "luci-app-timewol",
+  "desc": "网络唤醒",
+  "big": false
+ },
+ {
+  "name": "luci-app-transmission",
+  "desc": "BT下载",
+  "big": false
+ },
+ {
+  "name": "luci-app-ttyd",
+  "desc": "网页版命令行",
+  "big": false
+ },
+ {
+  "name": "luci-app-turboacc",
+  "desc": "网络加速",
+  "big": false
+ },
+ {
+  "name": "luci-app-unblockneteasemusic",
+  "desc": "解锁网易云音乐",
+  "big": false
+ },
+ {
+  "name": "luci-app-unishare",
+  "desc": "多种文件共享",
+  "big": false
+ },
+ {
+  "name": "luci-app-uugamebooster",
+  "desc": "UU游戏加速器",
+  "big": false
+ },
+ {
+  "name": "luci-app-vlmcsd",
+  "desc": "KMS服务器",
+  "big": false
+ },
+ {
+  "name": "luci-app-vsftpd",
+  "desc": "FTP服务器",
+  "big": false
+ },
+ {
+  "name": "luci-app-watchcat",
+  "desc": "断网检测重启",
+  "big": false
+ },
+ {
+  "name": "luci-app-webdav",
+  "desc": "基于Nginx的WebDAV",
+  "big": false
+ },
+ {
+  "name": "luci-app-wechatpush",
+  "desc": "通知推送",
+  "big": false
+ },
+ {
+  "name": "luci-app-apfree-wifidog",
+  "desc": "无线认证",
+  "big": false
+ },
+ {
+  "name": "luci-app-wifischedule",
+  "desc": "WiFi计划任务",
+  "big": false
+ },
+ {
+  "name": "luci-app-wireguard",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "luci-app-wrtbwmon",
+  "desc": "流量监控",
+  "big": false
+ },
+ {
+  "name": "luci-app-xlnetacc",
+  "desc": "迅雷快鸟",
+  "big": false
+ },
+ {
+  "name": "luci-app-xunyou",
+  "desc": "迅游加速器",
+  "big": false
+ },
+ {
+  "name": "luci-app-zerotier",
+  "desc": "内网穿透",
+  "big": false
+ },
+ {
+  "name": "luci-theme-footstrap",
+  "desc": "主题Footstrap",
+  "big": false
+ },
+ {
+  "name": "luci-theme-argon",
+  "desc": "主题Argon",
+  "big": false
+ },
+ {
+  "name": "luci-theme-shadcn",
+  "desc": "主题Shadcn",
+  "big": false
+ },
+ {
+  "name": "luci-theme-aurora",
+  "desc": "主题Aurora",
+  "big": false
+ },
+ {
+  "name": "luci-theme-alpha",
+  "desc": "主题Alpha",
+  "big": false
+ },
+ {
+  "name": "luci-theme-material",
+  "desc": "主题Material",
+  "big": false
+ },
+ {
+  "name": "luci-theme-material3",
+  "desc": "主题Material Design3",
+  "big": false
+ },
+ {
+  "name": "luci-theme-kucat",
+  "desc": "主题KuCat",
+  "big": false
+ },
+ {
+  "name": "luci-theme-openmptcprouter",
+  "desc": "主题OpenMPTCProuter",
+  "big": false
+ },
+ {
+  "name": "luci-theme-routerich",
+  "desc": "主题Routerich",
+  "big": false
+ },
+ {
+  "name": "luci-theme-spectra",
+  "desc": "主题Spectra",
+  "big": false
+ },
+ {
+  "name": "luci-theme-teleofis",
+  "desc": "主题Teleofis",
+  "big": false
+ },
+ {
+  "name": "luci-theme-lightblue",
+  "desc": "主题Lightblue",
+  "big": false
+ },
+ {
+  "name": "luci-theme-openwrt-2020",
+  "desc": "主题OpenWrt2020",
+  "big": false
+ },
+ {
+  "name": "luci-theme-openwrt",
+  "desc": "主题OpenWrt",
+  "big": false
+ },
+ {
+  "name": "automount",
+  "desc": "自动挂载USB/硬盘",
+  "big": false
+ },
+ {
+  "name": "btop",
+  "desc": "性能监控",
+  "big": false
+ },
+ {
+  "name": "naiveproxy",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "open-vm-tools",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "qemu-ga",
+  "desc": "",
+  "big": false
+ },
+ {
+  "name": "tvhelper",
+  "desc": "盒子助手",
+  "big": false
+ }
+]

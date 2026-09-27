@@ -1,0 +1,32 @@
+# Apache 部署：把所有不存在的路径交给前端控制器
+# （与 Nginx 的 try_files $uri /index.php?$query_string 等价）
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    # 真实存在的文件/目录直接服务
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+    # 其余全部走 index.php
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# 静态资源交给 CDN 长缓存；页面 HTML 不缓存
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|png|jpe?g|svg|webp|ico|woff2?)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
+# 保护不应被直接访问的路径
+RedirectMatch 404 ^/.*\.(db|sqlite|sqlite3|env|log)$
+RedirectMatch 404 ^/(app|src|templates|scripts)/

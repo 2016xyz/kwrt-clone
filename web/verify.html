@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>邮箱验证 · 夏诗意</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+
+<div id="app" v-cloak>
+<div class="boot" v-if="!ready">
+  <div class="boot-spinner"></div>
+  <div class="fs-sm">正在验证…</div>
+</div>
+
+
+  <!-- ============ 页头 ============ -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+        <span class="brand-text">{{ site.site_short || '夏诗意' }}</span>
+      </a>
+      <span class="spacer"></span>
+      <div class="nav-links desktop">
+        <a class="nav-link" href="/">返回首页</a>
+        <a class="nav-link" href="/login/">登录</a>
+      </div>
+      <theme-toggle></theme-toggle>
+    </div>
+  </header>
+
+  <main id="main" class="container container-tight" style="padding-top:var(--sp-12);padding-bottom:var(--sp-12)">
+
+    <div class="card card-pad-lg text-center">
+      <!-- 验证中 -->
+      <template v-if="state === 'working'">
+        <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4)">
+          <div class="boot-spinner"></div>
+        </div>
+        <h3>正在验证邮箱…</h3>
+        <p class="text-muted mt-2">请稍候，不要关闭页面。</p>
+      </template>
+
+      <!-- 成功 -->
+      <template v-else-if="state === 'ok'">
+        <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4);color:var(--s-success)">
+          <svg viewBox="0 0 24 24" width="62" height="62" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9.5"/><path d="M8.2 12.4l2.6 2.6 5-5.4"/>
+          </svg>
+        </div>
+        <h3>邮箱验证成功</h3>
+        <p class="text-muted mt-3">
+          账号 <b class="text-primary">{{ username }}</b> 已激活，现在可以正常登录了。
+        </p>
+
+        <div class="alert alert-success mt-5 text-center" style="display:block" v-if="sponsor">
+          你的赞助权益仍然有效，登录后即可使用全部定制选项。
+        </div>
+
+        <div class="stack-sm mt-6" style="max-width:300px;margin-left:auto;margin-right:auto">
+          <a class="btn btn-primary btn-lg btn-block" href="/login/">前往登录</a>
+          <a class="btn btn-outline btn-block" href="/">返回首页</a>
+        </div>
+      </template>
+
+      <!-- 失败 -->
+      <template v-else>
+        <div style="display:flex;justify-content:center;margin-bottom:var(--sp-4);color:var(--s-danger)">
+          <svg viewBox="0 0 24 24" width="62" height="62" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9.5"/><path d="M12 7.6v5.2M12 16.3h.01"/>
+          </svg>
+        </div>
+        <h3>{{ title }}</h3>
+        <p class="text-muted mt-3">{{ detail }}</p>
+
+        <!-- 可重发时给个入口 -->
+        <div class="divider-text" v-if="resendable">重新发送验证邮件</div>
+        <div class="stack-sm" v-if="resendable" style="max-width:320px;margin:0 auto">
+          <div class="input-group">
+            <input class="input" v-model.trim="resendUser" placeholder="输入你的用户名"
+                   autocomplete="username" @keyup.enter="doResend">
+            <button class="btn btn-primary" :class="{ 'is-loading': resending }"
+                    :disabled="resending || !resendUser" @click="doResend">发送</button>
+          </div>
+          <p class="field-hint">我们只会向注册时登记的邮箱重发，不会显示邮箱内容。</p>
+        </div>
+
+        <div class="stack-sm mt-6" style="max-width:300px;margin-left:auto;margin-right:auto">
+          <a class="btn btn-outline btn-block" href="/login/">返回登录</a>
+        </div>
+      </template>
+
+      <div class="alert alert-info mt-6 text-left" v-if="state !== 'ok'">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+        <div class="alert-bd">
+          <div class="alert-title">没收到邮件？</div>
+          请检查垃圾邮件目录；确认注册时填写的邮箱是否正确；
+          验证链接有有效期，过期后可在上方重新发送。
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:0;padding-top:0">
+        <span>© {{ year }} {{ site.site_name || site.site_short || '夏诗意' }}</span>
+        <span v-if="site.icp_text">{{ site.icp_text }}</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/jquery.min.js"></script>
+<script src="/assets/js/common.js"></script>
+<script>
+(function () {
+  const { createApp, ref, onMounted } = Vue;
+
+  const app = createApp({
+    setup() {
+      const ready = ref(false);
+      const state = ref('working');   // working | ok | err
+      const title = ref('验证失败');
+      const detail = ref('');
+      const username = ref('');
+      const sponsor = ref(false);
+      const resendable = ref(false);
+      const resendUser = ref('');
+      const resending = ref(false);
+      const site = ref({});
+      const year = new Date().getFullYear();
+
+      async function doResend() {
+        if (!resendUser.value) return;
+        resending.value = true;
+        try {
+          const r = await K.postForm('/api/v1/resend_verify', { username: resendUser.value });
+          K.toast(r.detail || '已发送', 'success');
+          resendable.value = false;
+        } catch (e) {
+          K.toast(e.message || '发送失败', 'error');
+        } finally {
+          resending.value = false;
+        }
+      }
+
+      onMounted(async () => {
+        try { site.value = await K.api('/api/v1/site'); } catch (e) { }
+
+        const token = new URLSearchParams(location.search).get('token') || '';
+        if (!token) {
+          state.value = 'err';
+          title.value = '缺少验证参数';
+          detail.value = '这个链接不完整。请直接点击邮件里的验证链接，或回到登录页重新发送。';
+          ready.value = true; return;
+        }
+        try {
+          const r = await K.postForm('/api/v1/verify_email', { token });
+          state.value = 'ok';
+          username.value = r.username || '';
+          sponsor.value = !!r.sponsor;
+          document.title = '验证成功 · 夏诗意';
+        } catch (e) {
+          state.value = 'err';
+          const msg = (e && e.message) || '验证失败';
+          title.value = msg.indexOf('过期') >= 0 ? '验证链接已过期'
+                      : msg.indexOf('已被使用') >= 0 ? '这个链接已经用过了' : '验证失败';
+          detail.value = msg;
+          resendable.value = true;
+        } finally {
+          ready.value = true;
+        }
+      });
+
+      return { ready, state, title, detail, username, sponsor,
+               resendable, resendUser, resending, site, year, doResend };
+    }
+  });
+
+  app.mount('#app');
+})();
+</script>
+</body>
+</html>

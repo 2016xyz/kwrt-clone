@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>新插件收录提议 · 夏诗意</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<div id="app" v-cloak>
+<div class="boot" v-if="!ready">
+  <div class="boot-spinner"></div>
+  <div class="fs-sm">正在载入…</div>
+</div>
+
+  <!-- ============ 页头 ============ -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+        <span class="brand-text">{{ site.site_short || '夏诗意' }}</span>
+      </a>
+      <nav class="nav-links desktop" aria-label="主导航">
+        <a class="nav-link" href="/">固件定制</a>
+        <a class="nav-link" href="/packages/">软件库</a>
+        <a class="nav-link on" href="/newpkg/">插件提议</a>
+        <a class="nav-link" href="/fadian/">为爱发电</a>
+        <a class="nav-link" href="/contact/">联系</a>
+        <a class="nav-link" href="/admin/" v-if="user.is_admin">管理后台</a>
+      </nav>
+      <span class="spacer"></span>
+      <div class="nav-links">
+        <a class="btn btn-outline btn-sm" href="/login/" v-if="!user.logged_in">登录</a>
+        <a class="btn btn-ghost btn-sm" href="/login/" v-else>{{ user.username }}</a>
+      </div>
+      <theme-toggle></theme-toggle>
+      <button class="burger" @click="menu = true" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <template v-if="menu">
+    <div class="drawer-mask" @click="menu = false"></div>
+    <aside class="drawer" role="dialog" aria-label="导航菜单">
+      <div class="row-between mb-4">
+        <b>{{ site.site_short || '夏诗意' }}</b>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="menu = false" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <a class="nav-link" href="/" @click="menu = false">固件定制</a>
+      <a class="nav-link" href="/packages/" @click="menu = false">软件库</a>
+      <a class="nav-link on" href="/newpkg/" @click="menu = false">插件提议</a>
+      <a class="nav-link" href="/fadian/" @click="menu = false">为爱发电</a>
+      <a class="nav-link" href="/contact/" @click="menu = false">联系</a>
+      <div class="divider"></div>
+      <a class="nav-link" href="/admin/" v-if="user.is_admin" @click="menu = false">管理后台</a>
+    </aside>
+  </template>
+
+  <main id="main" class="container" style="padding-top:var(--sp-8);padding-bottom:var(--sp-12)">
+
+    <div class="page-head">
+      <h1>新插件收录提议</h1>
+      <p class="text-muted">
+        想在本站固件里用上某个尚未收录的插件？把它的仓库地址提上来。
+        管理员审核通过后会并入软件源，之后即可在固件定制页直接勾选。
+      </p>
+    </div>
+
+    <div class="layout-split">
+      <!-- 左：提交表单 -->
+      <div class="stack">
+        <div class="card">
+          <div class="card-hd"><h4>提交提议</h4></div>
+
+          <div class="card-bd stack">
+            <div class="field">
+              <label class="field-label">插件名 <span class="req">*</span></label>
+              <input class="input" v-model.trim="f.name" maxlength="80"
+                     placeholder="如 luci-app-filemanager" :disabled="busy">
+              <div class="field-hint">OpenWrt 插件通常以 luci-app- 开头。</div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">仓库地址 <span class="req">*</span></label>
+              <input class="input mono" v-model.trim="f.url" maxlength="300"
+                     placeholder="https://github.com/用户名/仓库名" :disabled="busy"
+                     @keyup.enter="submit">
+              <div class="field-hint">须为 http(s) 链接，指向插件源码仓库。</div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">说明</label>
+              <textarea class="textarea" v-model.trim="f.note" rows="3" maxlength="500"
+                        placeholder="用途、适用设备、是否有额外依赖等（选填）" :disabled="busy"></textarea>
+            </div>
+
+            <div class="alert alert-danger" v-if="err" style="display:block">{{ err }}</div>
+            <div class="alert alert-success" v-if="okMsg" style="display:block">{{ okMsg }}</div>
+
+            <div class="row-wrap gap-2">
+              <button class="btn btn-primary" :class="{ 'is-loading': busy }"
+                      :disabled="busy || !canSubmit" @click="submit">提交提议</button>
+              <button class="btn btn-ghost" :disabled="busy" @click="reset">清空</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert alert-info">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+          <div class="alert-bd">
+            <div class="alert-title">关于收录</div>
+            收录与否取决于插件本身的维护状况与兼容性。同一仓库不会重复收录；
+            提交过于频繁会被暂时限流。提议列表默认只展示未驳回的条目。
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：提议列表 -->
+      <div class="stack layout-aside">
+        <div class="card">
+          <div class="card-hd">
+            <h4>已有提议</h4>
+            <span class="badge badge-info">{{ total }} 条</span>
+          </div>
+
+          <div class="card-bd stack-sm" v-if="list.length">
+            <div class="proposal-item" v-for="p in list" :key="p.id">
+              <div class="row-between gap-2">
+                <b class="break-all">{{ p.name }}</b>
+                <span class="badge" :class="statusClass(p.status)">{{ statusText(p.status) }}</span>
+              </div>
+              <a class="fs-xs mono break-all text-muted" :href="p.url" target="_blank"
+                 rel="noopener nofollow">{{ p.url }}</a>
+              <p class="fs-sm text-muted m-0" v-if="p.note">{{ p.note }}</p>
+              <div class="row-between fs-xs text-faint">
+                <span>{{ fmtDate(p.created) }}</span>
+                <button class="btn btn-xs btn-ghost" v-if="p.status === 'pending'"
+                        @click="withdraw(p)">撤回</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="empty" v-else>
+            <h4>还没有提议</h4>
+            <p class="text-muted">成为第一个提交插件的人。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:0;padding-top:0">
+        <span>© {{ year }} {{ site.site_name || site.site_short || '夏诗意' }}</span>
+        <span class="row-wrap gap-3">
+          <a href="/">固件定制</a>
+          <a href="/packages/">软件库</a>
+          <a href="/fadian/">为爱发电</a>
+          <a href="/contact/">联系</a>
+        </span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/newpkg.js"></script>
+</body>
+</html>

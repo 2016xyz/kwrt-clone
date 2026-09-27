@@ -1,0 +1,63 @@
+# ============================================================
+#  Kwrt 定制站 —— 版本控制忽略规则
+#  原则：源码进库，运行时状态与凭据一律不进库
+# ============================================================
+
+# ---- 凭据与运行时数据库（含 GitHub Token / SMTP 密码 / HMAC 密钥 / 密码哈希）----
+users.db
+users.db-wal
+users.db-shm
+*.sqlite
+*.sqlite3
+*.db
+
+# ---- 本地配置覆盖（config.json 本身不含凭据，可入库；
+#      但允许用 *.local.json 覆盖，这类文件不入库）----
+config.local.json
+*.local.json
+.env
+.env.*
+
+# ---- 构建工作区与缓存（体积巨大，可重新下载）----
+work/
+cache/
+store/
+!store/.gitkeep
+
+# ---- 构建产物与下载物 ----
+*.img
+*.img.gz
+*.tar.gz
+*.tar.zst
+*.vmdk
+*.bin
+*.itb
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 日志与临时文件 ----
+*.log
+logs/
+tmp/
+*.tmp
+*.swp
+*~
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 前端 ----
+node_modules/
+dist/
+.ekko-tmp/

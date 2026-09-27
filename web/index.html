@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>夏诗意 · OpenWrt 固件在线定制编译</title>
+<meta name="description" :content="site.site_desc || '为你的设备在线定制并实时编译 OpenWrt 固件'">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+
+<div id="app" v-cloak>
+<div class="boot" v-if="booting">
+  <div class="boot-spinner"></div>
+  <div class="fs-sm">正在载入设备与软件包数据…</div>
+</div>
+
+
+  <!-- ================= 页头 ================= -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+        <span class="brand-text">{{ site.site_short || '夏诗意' }}</span>
+      </a>
+
+      <nav class="nav-links desktop" aria-label="主导航">
+        <a class="nav-link on" href="/">固件定制</a>
+        <a class="nav-link" :href="site.packages_url || '/packages/'">软件库</a>
+        <a class="nav-link" href="/newpkg/">插件提议</a>
+        <a class="nav-link" href="/fadian/">为爱发电</a>
+        <a class="nav-link" href="/contact/">联系</a>
+        <a class="nav-link" href="#" v-if="site['sponsor.enabled']"
+           @click.prevent="openSponsor = true">赞助支持</a>
+        <a class="nav-link" href="/admin/" v-if="user.is_admin">管理后台</a>
+      </nav>
+
+      <span class="spacer"></span>
+
+      <div class="nav-links">
+        <theme-toggle></theme-toggle>
+        <template v-if="user.logged_in">
+          <!-- 我的订单直达入口 —— 与 PHP 版 layout.php 的「我的订单」链接对齐。
+               订单区在页面下方，页头给一个随时可点的入口，
+               免得用户又要靠「某个卡片有没有消失」来猜订单在哪。 -->
+          <a class="nav-link" href="#orders" v-if="sponsorOrders.length">我的订单</a>
+          <a class="badge badge-accent" href="/login/" v-if="user.sponsor"
+             :title="'赞助到期：' + (user.sponsor_until ? K.datetime(user.sponsor_until) : '')">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/></svg>
+            {{ user.sponsor_tier || '赞助' }}
+          </a>
+          <a class="nav-link" href="/login/">{{ user.username }}</a>
+          <button class="btn btn-ghost btn-sm" @click="doLogout">退出</button>
+        </template>
+        <a v-else class="btn btn-primary btn-sm" href="/login/">登录 / 注册</a>
+      </div>
+
+      <button class="burger" @click="menu = true" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 移动端抽屉 -->
+  <template v-if="menu">
+    <div class="drawer-mask" @click="menu = false"></div>
+    <aside class="drawer" role="dialog" aria-label="导航菜单">
+      <div class="row-between mb-4">
+        <b>{{ site.site_short || '夏诗意' }}</b>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="menu = false" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <a class="nav-link" href="/" @click="menu = false">固件定制</a>
+      <a class="nav-link" :href="site.packages_url || '/packages/'" @click="menu = false">软件库</a>
+      <a class="nav-link" href="/newpkg/" @click="menu = false">插件提议</a>
+      <a class="nav-link" href="/fadian/" @click="menu = false">为爱发电</a>
+      <a class="nav-link" href="/contact/" @click="menu = false">联系</a>
+      <a class="nav-link" href="/admin/" v-if="user.is_admin" @click="menu = false">管理后台</a>
+      <a class="nav-link" href="#orders" v-if="sponsorOrders.length" @click="menu = false">我的订单</a>
+      <div class="divider"></div>
+      <a class="nav-link" href="/login/" @click="menu = false">{{ user.logged_in ? '我的账户' : '登录 / 注册' }}</a>
+      <a class="nav-link" href="#" @click.prevent="menu = false; openSponsor = true" v-if="site['sponsor.enabled']">赞助支持</a>
+    </aside>
+  </template>
+
+  <main id="main">
+
+    <!-- ================= 公告 ================= -->
+    <div class="container" style="padding-top:var(--sp-5)" v-if="site.announcement">
+      <div class="alert alert-info">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 10v4a1.5 1.5 0 0 0 1.5 1.5h2l5 4V4.5l-5 4H5A1.5 1.5 0 0 0 3.5 10z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+        <div class="alert-bd pre-wrap">{{ site.announcement }}</div>
+      </div>
+    </div>
+
+    <!-- ================= 首屏 ================= -->
+    <section class="container" style="padding:var(--sp-10) var(--sp-5) var(--sp-8)">
+      <div class="text-center" style="max-width:760px;margin:0 auto">
+        <h1 style="font-size:clamp(26px,5vw,40px);line-height:1.25">
+          {{ site.hero_title || '为你的设备，编译一个专属固件' }}
+        </h1>
+        <p class="text-muted mt-4" style="font-size:var(--fs-md);max-width:56ch;margin-left:auto;margin-right:auto">
+          {{ site.hero_subtitle || '搜索你的设备，挑选软件包，实时编译出可直接刷写的 OpenWrt 固件。' }}
+        </p>
+
+        <!-- 设备搜索 -->
+        <div class="search-wrap mt-6" style="max-width:560px;margin-left:auto;margin-right:auto;position:relative">
+          <span class="search-icon">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+          </span>
+          <input class="input input-sm" style="height:46px;font-size:var(--fs-md)"
+                 v-model.trim="query" @focus="openList = true" @input="openList = true"
+                 @keydown.down.prevent="move(1)" @keydown.up.prevent="move(-1)"
+                 @keydown.enter.prevent="pickHighlighted" @keydown.esc="openList = false"
+                 :placeholder="site.devices_hint || '输入设备名称或型号，例如 x86/64、R2S、AX3000'"
+                 role="combobox" aria-autocomplete="list" :aria-expanded="openList ? 'true' : 'false'"
+                 aria-controls="device-list">
+
+          <div class="card" v-if="openList && (query || filtered.length)"
+               style="position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:50;padding:var(--sp-2);max-height:340px;overflow-y:auto;text-align:left">
+            <div v-if="!filtered.length" class="text-muted fs-sm" style="padding:var(--sp-4);text-align:center">
+              没有匹配的设备，换个关键词试试
+            </div>
+            <button v-for="(d, i) in filtered.slice(0, 60)" :key="d.target + '/' + d.id"
+                    class="btn btn-ghost w-full" style="justify-content:flex-start;height:auto;padding:var(--sp-2) var(--sp-3);text-align:left"
+                    :style="i === hl ? 'background:var(--primary-soft)' : ''"
+                    @click="pickDevice(d)" @mouseenter="hl = i">
+              <span class="stack-sm" style="gap:2px;flex:1;min-width:0">
+                <span class="fs-sm fw-600 truncate">{{ d.title || d.id }}</span>
+                <span class="fs-xs text-faint mono truncate">{{ d.target }} / {{ d.id }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="cluster-sm mt-4" style="justify-content:center">
+          <span class="fs-xs text-faint">热门：</span>
+          <button v-for="q in hotQueries" :key="q" class="chip" @click="query = q; openList = true">{{ q }}</button>
+        </div>
+
+        <p class="fs-xs text-faint mt-4">
+          已收录 <b class="text-primary">{{ devices.length }}</b> 台设备
+          <template v-if="site.build">· 构建后端 {{ site.build.effective === 'github' ? 'GitHub Actions' : '本机' }}</template>
+        </p>
+      </div>
+    </section>
+
+    <!-- ================= 已选设备 + 定制 ================= -->
+    <section class="container" style="padding-bottom:var(--sp-8)" v-if="device">
+      <div class="layout-split">
+
+        <!-- 左：定制表单 -->
+        <div class="stack-lg" style="min-width:0">
+
+          <!-- 设备信息 -->
+          <div class="card">
+            <div class="row-between">
+              <div style="min-width:0">
+                <h3 style="margin-bottom:4px">{{ device.title || device.id }}</h3>
+                <div class="cluster-sm">
+                  <span class="tag">{{ device.target }}/{{ device.id }}</span>
+                  <span class="badge badge-primary">{{ branch }} 分支</span>
+                  <span class="badge" v-if="device.kernelVersion">内核 {{ device.kernelVersion }}</span>
+                </div>
+              </div>
+              <button class="btn btn-ghost btn-sm" @click="clearDevice">换一台</button>
+            </div>
+
+            <div class="divider"></div>
+            <div class="grid grid-auto-sm" style="gap:var(--sp-4)">
+              <div>
+                <div class="fs-xs text-muted fw-600 mb-1">平台</div>
+                <div class="fs-sm mono">{{ device.target }}</div>
+              </div>
+              <div>
+                <div class="fs-xs text-muted fw-600 mb-1">机型 ID</div>
+                <div class="fs-sm mono">{{ device.id }}</div>
+              </div>
+              <div>
+                <div class="fs-xs text-muted fw-600 mb-1">后台地址</div>
+                <div class="fs-sm mono">{{ ip }}</div>
+              </div>
+              <div>
+                <div class="fs-xs text-muted fw-600 mb-1">默认密码</div>
+                <div class="fs-sm mono">{{ device.password || '无 / 首次设置' }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 预编译镜像 -->
+          <div class="card" v-if="images.length">
+            <div class="card-hd">
+              <h4>官方预编译镜像</h4>
+              <span class="spacer"></span>
+              <span class="badge">{{ images.length }} 个</span>
+            </div>
+            <p class="fs-sm text-muted mb-4">下载后可直接刷写，无需自行编译。</p>
+            <div class="table-wrap">
+              <div class="table-scroll">
+                <table class="table table-responsive">
+                  <thead><tr><th>类型</th><th>文件</th><th class="num">大小</th><th></th></tr></thead>
+                  <tbody>
+                    <tr v-for="im in images" :key="im.name">
+                      <td data-label="类型"><span class="badge">{{ im.kind || '镜像' }}</span></td>
+                      <td data-label="文件">
+                        <div class="fs-sm truncate" style="max-width:300px" :title="im.name">{{ im.name }}</div>
+                        <div class="fs-xs text-faint mono truncate" style="max-width:300px"
+                             v-if="im.sha256" :title="im.sha256">sha256: {{ im.sha256.slice(0, 16) }}…</div>
+                      </td>
+                      <td data-label="大小" class="num">{{ K.bytes(im.size) }}</td>
+                      <td class="actions">
+                        <a class="btn btn-sm btn-outline" :href="im.url" download>下载</a>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 定制表单 -->
+          <div class="card">
+            <div class="card-hd">
+              <h4>{{ site.customize_title || '自定义构建固件' }}</h4>
+            </div>
+
+            <!-- 1. 基本信息 -->
+            <div class="section">
+              <div class="section-title"><span class="num">1</span> 基本信息</div>
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-host">主机名</label>
+                  <input id="f-host" class="input" v-model.trim="form.hostname" placeholder="OpenWrt">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-ip">LAN 地址</label>
+                  <input id="f-ip" class="input" v-model.trim="form.ip" placeholder="192.168.1.1">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-tz">时区</label>
+                  <select id="f-tz" class="select" v-model="form.timezone">
+                    <option v-for="t in timezones" :key="t.v" :value="t.v">{{ t.l }}</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-pw">后台密码</label>
+                  <input id="f-pw" class="input" v-model="form.password" placeholder="留空则无密码">
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 2. 软件包 -->
+            <div class="section">
+              <div class="section-title">
+                <span class="num">2</span> 软件包
+                <span class="badge" :class="overQuota ? 'badge-danger' : 'badge-primary'">
+                  {{ selectedPkgs.length }} / {{ quotaText }}
+                </span>
+              </div>
+              <p class="section-desc mb-3">点击标签快速选择；也可直接输入包名，前缀 <code>-</code> 表示移除。</p>
+
+              <div class="input-group mb-4">
+                <input class="input" v-model.trim="pkgInput" list="pkg-suggest"
+                       @keydown.enter.prevent="addPkg" placeholder="输入软件包名后按回车">
+                <datalist id="pkg-suggest">
+                  <option v-for="p in pkgSuggest" :key="p" :value="p"></option>
+                </datalist>
+                <button class="btn btn-outline" @click="addPkg">添加</button>
+              </div>
+
+              <div class="chips mb-4" v-if="commonPkgs.length">
+                <button v-for="p in commonPkgs" :key="p.name" class="chip"
+                        :class="{ on: hasPkg(p.name) }" @click="togglePkg(p.name)"
+                        :title="p.name">{{ p.label || p.name }}</button>
+              </div>
+
+              <div class="card card-sunken card-pad-sm" v-if="selectedPkgs.length">
+                <div class="fs-xs text-muted fw-600 mb-2">已选 {{ selectedPkgs.length }} 个</div>
+                <div class="chips">
+                  <span v-for="p in selectedPkgs" :key="p" class="chip on" @click="removePkg(p)">
+                    {{ p }} <span class="x">×</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="alert alert-warning mt-3" v-if="overQuota">
+                <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2l9 15.6H3z"/><path d="M12 9.4v4.2M12 16.4h.01"/></svg></span>
+                <div class="alert-bd">
+                  非赞助用户最多选择 {{ site.default_quota || 12 }} 个插件，当前 {{ selectedPkgs.length }} 个。
+                  <a href="#" @click.prevent="openSponsor = true">赞助后可解除限制</a>。
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 3. 网络与启动 -->
+            <div class="section">
+              <div class="section-title"><span class="num">3</span> 网络与启动</div>
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-fs">文件系统</label>
+                  <select id="f-fs" class="select" v-model="form.filesystem">
+                    <option value="squashfs">squashfs（推荐，可恢复出厂）</option>
+                    <option value="ext4">ext4（可写，占空间大）</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-boot">启动方式</label>
+                  <select id="f-boot" class="select" v-model="form.boot">
+                    <option value="efi">EFI</option>
+                    <option value="legacy">Legacy BIOS</option>
+                    <option value="both">双启动</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-rootfs">
+                    根分区容量
+                    <span class="badge badge-accent" v-if="!user.sponsor">赞助项</span>
+                  </label>
+                  <div class="input-group">
+                    <input id="f-rootfs" class="input" type="number" min="100" max="6144"
+                           v-model.number="form.rootfsSize" :disabled="!user.sponsor">
+                    <span class="addon">MB</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-mode">接入方式</label>
+                  <select id="f-mode" class="select" v-model="form.mode">
+                    <option value="router">主路由</option>
+                    <option value="bypass">旁路由</option>
+                    <option value="ap">无线 AP</option>
+                    <option value="bridge">桥接</option>
+                  </select>
+                </div>
+                <div class="field" v-if="form.mode === 'bypass'">
+                  <label class="field-label" for="f-gw">主路由网关</label>
+                  <input id="f-gw" class="input" v-model.trim="form.gateway" placeholder="192.168.1.1">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-port">Web 端口</label>
+                  <input id="f-port" class="input" type="number" min="1" max="65535" v-model.number="form.port">
+                </div>
+              </div>
+
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-pppoe">PPPoE 账号</label>
+                  <input id="f-pppoe" class="input" v-model.trim="form.pppoeUser" placeholder="留空则不启用">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-pppoep">PPPoE 密码</label>
+                  <input id="f-pppoep" class="input" type="password" v-model="form.pppoePass">
+                </div>
+              </div>
+
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-kernel">内核版本</label>
+                  <select id="f-kernel" class="select" v-model="form.kernelVer">
+                    <option value="">跟随分支默认</option>
+                    <option value="6.6">6.6（长期支持）</option>
+                    <option value="6.12">6.12（较新）</option>
+                    <option value="5.15">5.15（老设备兼容好）</option>
+                  </select>
+                  <span class="field-hint">老设备或需特定驱动时再手动指定。</span>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-wanlan">网口模式</label>
+                  <select id="f-wanlan" class="select" v-model="form.wanlan">
+                    <option value="">默认（WAN/LAN 按板型自动）</option>
+                    <option value="eth0wan">默认 eth0 为 WAN 口</option>
+                    <option value="swap">交换默认网口（WAN/LAN 对调）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-usbnet">USB 有线网卡</label>
+                  <select id="f-usbnet" class="select" v-model="form.usbNet">
+                    <option value="">不预置</option>
+                    <option value="r8152">Realtek RTL8152/8153（绿联/奥睿科常见）</option>
+                    <option value="ax88179">ASIX AX88179</option>
+                    <option value="cdc">通用 CDC-Ethernet</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-usbwifi">
+                    USB 无线网卡
+                    <span class="badge badge-accent" v-if="!user.sponsor">赞助项</span>
+                  </label>
+                  <select id="f-usbwifi" class="select" v-model="form.usbWifi"
+                          :disabled="!user.sponsor">
+                    <option value="">不预置</option>
+                    <option value="mt76">MediaTek MT76 系</option>
+                    <option value="rtl88x2bu">Realtek RTL88x2BU</option>
+                    <option value="rtl8812au">Realtek RTL8812AU</option>
+                    <option value="ath9k">Atheros ath9k_htc</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-https">
+                    后台使用 HTTPS
+                    <span class="badge badge-accent" v-if="!user.sponsor">赞助项</span>
+                  </label>
+                  <select id="f-https" class="select" v-model="form.httpsBackend"
+                          :disabled="!user.sponsor">
+                    <option value="">否（HTTP）</option>
+                    <option value="self">是（自签证书）</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-expose">需要暴露至公网的端口</label>
+                  <input id="f-expose" class="input" v-model.trim="form.exposePorts"
+                         placeholder="如 80 443 51820，空格分隔">
+                  <span class="field-hint">仅填写数字与空格，将在防火墙中放行。</span>
+                </div>
+              </div>
+
+              <div class="field mt-3">
+                <label class="field-label" for="f-quick">后台快捷访问地址</label>
+                <input id="f-quick" class="input" v-model.trim="form.quickUrl"
+                       placeholder="如 kwrt.lan（留空则不设置）">
+                <span class="field-hint">写入 hosts 提示，便于记忆后台入口。</span>
+              </div>
+
+              <div class="check mt-3">
+                <input type="checkbox" id="f-wifi" v-model="form.wifi">
+                <label for="f-wifi">启用 WIFI（生成默认无线配置）</label>
+              </div>
+              <div class="grid grid-2 mt-3" v-if="form.wifi">
+                <div class="field">
+                  <label class="field-label" for="f-ssid">WIFI 名称 (SSID)</label>
+                  <input id="f-ssid" class="input" v-model.trim="form.ssid" placeholder="Kwrt">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-wkey">WIFI 密码</label>
+                  <input id="f-wkey" class="input" v-model="form.wifiKey" placeholder="留空为开放网络">
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 4. 界面与高级 -->
+            <div class="section">
+              <div class="section-title"><span class="num">4</span> 界面与进阶</div>
+              <div class="grid grid-2 mt-3">
+                <div class="field">
+                  <label class="field-label" for="f-theme">主题</label>
+                  <select id="f-theme" class="select" v-model="form.theme">
+                    <option value="">默认</option>
+                    <option v-for="t in themes" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="f-web">Web 服务器</label>
+                  <select id="f-web" class="select" v-model="form.webserver">
+                    <option value="uhttpd">uhttpd（默认）</option>
+                    <option value="nginx">nginx</option>
+                    <option value="lighttpd">lighttpd</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="cluster mt-3">
+                <label class="switch" v-for="o in toggles" :key="o.k">
+                  <input type="checkbox" v-model="form[o.k]" :disabled="o.vip && !user.sponsor">
+                  <span class="switch-track"></span>
+                  <span class="fs-sm">{{ o.l }}</span>
+                  <span class="badge badge-accent" v-if="o.vip && !user.sponsor">赞助</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 5. 预设插件包 -->
+            <div class="section">
+              <div class="section-title">
+                <span class="num">5</span> 预设插件包
+                <span class="badge badge-info ml-2">{{ selectedPkgs.length }} 个已选</span>
+              </div>
+              <p class="fs-sm text-muted mt-2">
+                勾选需要预装的应用与主题。已选的包会并入上方「软件包」清单一起编译。
+                <span v-if="!user.sponsor">免费用户受 luci-app-* 数量限制（当前上限 {{ quota }} 个），赞助后不限。</span>
+              </p>
+
+              <!-- 代理套件快捷选择 -->
+              <div class="field mt-4">
+                <label class="field-label">一键代理套件</label>
+                <div class="chip-wrap">
+                  <button class="chip chip-suite" v-for="s in suites" :key="s.k"
+                          :class="{ on: suiteOn(s) }" @click="toggleSuite(s)">
+                    {{ s.l }}
+                  </button>
+                </div>
+                <span class="field-hint">点击即加入或移除该套件所需的包。</span>
+              </div>
+
+              <!-- 分类勾选 -->
+              <div class="preset-cat" v-for="cat in presetCats" :key="cat.k"
+                   v-show="presetsByCat(cat.k).length">
+                <div class="preset-cat-hd" @click="collapsed[cat.k] = !collapsed[cat.k]">
+                  <span class="caret" :class="{ open: !collapsed[cat.k] }">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                         stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+                  </span>
+                  <b>{{ cat.l }}</b>
+                  <span class="badge">{{ presetsByCat(cat.k).filter(p => isPicked(p.n)).length }}
+                    / {{ presetsByCat(cat.k).length }}</span>
+                </div>
+                <div class="preset-list" v-show="!collapsed[cat.k]">
+                  <label class="preset-item" v-for="p in presetsByCat(cat.k)" :key="p.n"
+                         :class="{ on: isPicked(p.n) }">
+                    <input type="checkbox" :checked="isPicked(p.n)" @change="togglePkg(p.n)">
+                    <span class="preset-name">{{ p.l }}</span>
+                    <span class="preset-desc">{{ p.d }}</span>
+                    <code class="preset-pkg">{{ p.n }}</code>
+                  </label>
+                </div>
+              </div>
+
+              <div class="field mt-4" v-if="extraPkgs.length">
+                <label class="field-label">自定义追加的包</label>
+                <div class="chip-wrap">
+                  <span class="chip on" v-for="(p, i) in extraPkgs" :key="p">
+                    {{ p }}
+                    <button class="chip-x" @click="removeExtra(p)" aria-label="移除">×</button>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 6. 自定义扩展 -->
+            <div class="section">
+              <div class="section-title"><span class="num">6</span> 自定义扩展</div>
+
+              <div class="field mt-3">
+                <label class="field-label" for="f-uci">开机执行脚本（uci-defaults）</label>
+                <textarea id="f-uci" class="textarea mono" v-model="form.uciDefaults" rows="5"
+                          placeholder="#!/bin/sh&#10;# 首次启动时执行，可用于写入自定义配置&#10;uci set system.@system[0].hostname='MyRouter'&#10;uci commit"></textarea>
+                <span class="field-hint">以 <code>#!/bin/sh</code> 开头，首启时自动执行一次后删除。</span>
+              </div>
+
+              <div class="field mt-4">
+                <label class="field-label">自定义文件包</label>
+                <div class="dropzone" @click="$refs.fileInput.click()"
+                     @dragover.prevent="dragOver = true" @dragleave="dragOver = false"
+                     @drop.prevent="onDrop" :class="{ over: dragOver }">
+                  <div class="ic">
+                    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor"
+                         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4.5M7.5 9L12 4.5 16.5 9"/><path d="M4 16v3.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V16"/></svg>
+                  </div>
+                  <div class="fs-sm fw-600">点击选择或拖拽 tar.gz 文件</div>
+                  <div class="fs-xs text-faint mt-1">内容会解压覆盖到固件根目录</div>
+                </div>
+                <input ref="fileInput" type="file" accept=".tar.gz,.tgz,application/gzip"
+                       class="hidden" @change="onFilePick">
+                <div class="alert alert-success mt-3" v-if="form.file">
+                  <div class="alert-bd row-between">
+                    <span class="fs-sm truncate">{{ form.file.name }} · {{ K.bytes(form.file.size) }}</span>
+                    <button class="btn btn-xs btn-ghost" @click="form.file = null">移除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右：操作栏 -->
+        <div class="stack layout-aside">
+          <div class="card">
+            <h4 class="mb-3">构建摘要</h4>
+            <div class="stack-sm fs-sm">
+              <div class="row-between"><span class="text-muted">设备</span><span class="truncate" style="max-width:180px">{{ device.id }}</span></div>
+              <div class="row-between"><span class="text-muted">分支</span><span>{{ branch }}</span></div>
+              <div class="row-between"><span class="text-muted">软件包</span><span>{{ selectedPkgs.length }} 个</span></div>
+              <div class="row-between"><span class="text-muted">文件系统</span><span>{{ form.filesystem }}</span></div>
+              <div class="row-between"><span class="text-muted">启动</span><span>{{ form.boot }}</span></div>
+              <div class="row-between">
+                <span class="text-muted">后端</span>
+                <span>{{ site.build && site.build.effective === 'github' ? 'GitHub' : '本机' }}</span>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="field mb-3">
+              <label class="field-label" for="f-email">通知邮箱</label>
+              <input id="f-email" class="input input-sm" type="email" v-model.trim="form.email"
+                     :placeholder="user.logged_in ? '构建完成后邮件通知你' : '登录后可用'">
+            </div>
+
+            <button class="btn btn-accent btn-lg btn-block" :class="{ 'is-loading': building }"
+                    :disabled="building || overQuota" @click="startBuild">
+              {{ building ? '正在构建…' : '开始构建固件' }}
+            </button>
+            <p class="fs-xs text-faint text-center mt-3">
+              构建过程真实执行，通常需要 1–3 分钟。
+            </p>
+          </div>
+
+          <!-- 构建进度 -->
+          <div class="card" v-if="job">
+            <div class="row-between mb-3">
+              <h4>构建任务</h4>
+              <status-badge :status="job.status"></status-badge>
+            </div>
+
+            <div class="progress mb-3" :class="{ 'progress-indeterminate': job.status === 'running' || job.status === 'queued' }">
+              <div class="progress-bar" :style="{ width: job.progress + '%' }"></div>
+            </div>
+
+            <p class="fs-sm text-muted truncate">{{ job.message || '等待中…' }}</p>
+
+            <div class="stack-sm fs-xs text-faint mt-3">
+              <div class="row-between" v-if="job.queue_position !== undefined && job.queue_position !== null">
+                <span>队列位置</span><span>{{ job.queue_position }}</span>
+              </div>
+              <div class="row-between" v-if="job.duration"><span>耗时</span><span>{{ job.duration.toFixed(1) }} 秒</span></div>
+              <div class="row-between" v-if="job.gh_run_url">
+                <span>GitHub Run</span>
+                <a :href="job.gh_run_url" target="_blank" rel="noopener" class="fs-xs">查看</a>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- 下载链接 -->
+            <template v-if="job.download_links && job.download_links.length">
+              <div class="alert alert-success mb-3" style="display:block">
+                构建完成，共 {{ job.download_links.length }} 个文件。
+                <template v-if="job.link_ttl_hours">
+                  链接 <b>{{ job.link_ttl_hours }} 小时</b>内有效。
+                </template>
+              </div>
+              <div class="stack-sm">
+                <a v-for="l in job.download_links" :key="l.name" class="btn btn-outline btn-sm btn-block"
+                   :href="l.url" style="justify-content:space-between"
+                   :target="l.external ? '_blank' : null" :rel="l.external ? 'noopener' : null">
+                  <span class="truncate" style="flex:1">{{ l.name }}</span>
+                  <span class="fs-xs text-faint">{{ K.bytes(l.size) }}</span>
+                </a>
+              </div>
+              <p class="fs-xs text-faint mt-3" v-if="job.links_expire_at">
+                到期时间：{{ K.datetime(job.links_expire_at) }}
+              </p>
+              <div class="alert alert-info mt-3 fs-xs" style="display:block" v-if="job.mirror && job.mirror.external">
+                其中 {{ job.mirror.external }} 个文件托管于 GitHub，其有效期由 GitHub 产物保留策略决定。
+              </div>
+            </template>
+
+            <div class="alert alert-info fs-xs mt-3" style="display:block" v-if="job.mail_status && job.mail_status.ok">
+              已向 {{ job.mail_status.to }} 发送通知邮件。
+            </div>
+            <div class="alert alert-warning fs-xs mt-3" style="display:block" v-else-if="job.mail_status && !job.mail_status.ok">
+              邮件通知未送达：{{ job.mail_status.detail }}
+            </div>
+
+            <template v-if="job.status === 'failed'">
+              <!-- ★ 这里原来写的是 job.error，而 job.error 在整个前端**从未被赋值** ——
+                   后端把失败原因写在 stderr（见 app/backends.py 的 _await_completion /
+                   app/builder.py 的失败返回），模板却读了另一个字段。
+                   后果：真实原因被丢掉，用户永远只看到「请稍后重试或更换软件包组合。」
+                   而像「此 profile 不在官方 ImageBuilder 里」这种失败，重试永远不会成功 ——
+                   这句兜底文案是在把人往错方向带。
+                   同理 job.log_tail 也从未赋值，原来那块「查看日志尾部」是死代码。 -->
+              <div class="alert alert-danger mt-3" style="display:block">
+                <b>构建失败</b>
+                <pre class="fs-xs mt-2" style="white-space:pre-wrap;word-break:break-word">{{ job.stderr || job.error || job.detail || '（后端未返回失败原因，请到后台任务详情查看）' }}</pre>
+              </div>
+              <a class="btn btn-outline btn-sm btn-block mt-2" v-if="job.gh_run_url"
+                 :href="job.gh_run_url" target="_blank" rel="noopener">在 GitHub 查看完整日志</a>
+            </template>
+
+            <button class="btn btn-ghost btn-sm btn-block mt-3"
+                    v-if="job.status === 'running' || job.status === 'queued'" @click="cancelBuild">
+              取消构建
+            </button>
+          </div>
+
+          <!-- 赞助入口 / 已赞助状态
+               ★ 这里原来写的是 v-if="site['sponsor.enabled'] && !user.sponsor"。
+                 赞助成功后 user.sponsor 变 true，整张卡片**当场消失** —— 而这
+                 正是用户当时唯一的显眼入口（导航栏那个「赞助支持」小链接没人会去点），
+                 用户在设备定制页原地就找不到「我的订单」和「申请退款」了，
+                 于是报「赞助完成后没有显示订单、没有退款按钮」。
+                 入口不该因为「你已经付过钱」而消失：恰恰相反，付过钱的人才
+                 需要看订单和退款。所以改成只在站点关掉赞助时才隐藏。 -->
+          <div class="card" v-if="site['sponsor.enabled']">
+            <div class="cluster-sm mb-2">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--accent)"
+                   stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.4 6.7 19.2l1.1-5.9L3.5 9.2l5.9-.8z"/></svg>
+              <b v-if="!user.sponsor">解锁全部定制项</b>
+              <b v-else>你已是赞助用户</b>
+            </div>
+            <p class="fs-xs text-muted mb-3" v-if="!user.sponsor">赞助后解除插件数量限制，开放主机名、签名、根分区容量、VMDK 等高级选项。</p>
+            <p class="fs-xs text-muted mb-3" v-else>
+              有效期至 <b>{{ user.sponsor_until ? K.datetime(user.sponsor_until) : '—' }}</b>。
+              可在本页下方「我的订单」查看订单或申请退款。
+            </p>
+            <button class="btn btn-accent btn-block btn-sm" @click="openSponsor = true">
+              {{ user.sponsor ? '查看赞助方案 / 续费' : '查看赞助方案' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 未选设备 ================= -->
+    <section class="container" style="padding-bottom:var(--sp-10)" v-else-if="!booting">
+      <div class="card">
+        <empty-state title="请先选择你的设备"
+                     desc="在上方搜索框中输入设备名称或型号，例如 x86/64、R2S、AX3000。">
+        </empty-state>
+      </div>
+    </section>
+
+    <!-- ================= 我的订单 / 申请退款 =================
+         ★ 这一段原来长在「赞助弹窗」内部 —— 只有打开那个弹窗才看得到。
+           赞助成功后设备页的入口卡片会因 user.sponsor 变 true 而消失，
+           用户在原地看着入口没了，就报「赞助完成后没有显示订单、没有退款按钮」。
+           订单与退款是**付费用户的权利**，不能藏在一个可能打不开的弹窗里，
+           也不该依赖「有没有选中设备」。所以放成独立区块：
+           只要登录且有订单就显示，与设备选择、赞助状态、弹窗开关全部无关。 -->
+    <section class="container" id="orders" style="padding-bottom:var(--sp-8)"
+             v-if="!booting && user.logged_in && sponsorOrders.length">
+      <div class="card">
+        <div class="row-between mb-3">
+          <h2 class="fs-lg">我的订单</h2>
+          <span class="fs-xs text-faint">共 {{ sponsorOrders.length }} 笔</span>
+        </div>
+        <div class="order-list">
+          <div class="order-item" v-for="o in sponsorOrders" :key="o.out_trade_no">
+            <div class="order-main">
+              <div class="fs-sm fw-600">{{ o.tier_name }}
+                <span class="text-faint">/ {{ o.days }} 天</span></div>
+              <div class="fs-xs text-faint mono">{{ o.out_trade_no }}</div>
+            </div>
+            <div class="order-side">
+              <span class="fs-sm">{{ sym }}{{ o.amount }}</span>
+              <span class="badge badge-success" v-if="o.status === 'paid'">已支付</span>
+              <span class="badge badge-warning" v-else-if="o.status === 'paid_pending'">待确认</span>
+              <span class="badge" v-else-if="o.status === 'refunded'">已退款</span>
+              <span class="badge" v-else>{{ orderStatusText(o.status) }}</span>
+            </div>
+            <div class="order-act">
+              <span class="badge" v-if="o.refund_status">{{ o.refund_status }}</span>
+              <button class="btn btn-xs btn-ghost" v-if="o.refundable"
+                      @click="openRefund(o)">申请退款</button>
+            </div>
+          </div>
+        </div>
+        <p class="fs-xs text-faint mt-3" v-if="!refundEnabled">本站未开启退款通道。</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= 赞助弹窗 ================= -->
+  <div class="modal-mask" v-if="openSponsor" @click.self="closeSponsor">
+    <div class="modal">
+      <div class="modal-hd">
+        <h3>赞助支持</h3>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="closeSponsor" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-bd">
+        <p class="fs-sm text-muted mb-4" v-if="site['sponsor.note']">{{ site['sponsor.note'] }}</p>
+
+        <div class="tier-grid mb-4" v-if="tiers.length">
+          <button v-for="t in tiers" :key="t.name" class="tier"
+                  :class="{ on: chosenTier === t.name }" @click="chosenTier = t.name">
+            <div class="tier-name">{{ t.name }}</div>
+            <div class="tier-amount">{{ sym }}{{ t.amount }}<span> / {{ t.days }} 天</span></div>
+            <ul class="tier-perks"><li v-for="p in t.perks" :key="p">{{ p }}</li></ul>
+          </button>
+        </div>
+
+        <div class="stack-sm" v-if="!user.logged_in">
+          <div class="alert alert-info" style="display:block">请先登录账号后再进行赞助。</div>
+          <a class="btn btn-primary btn-block" href="/login/">前往登录</a>
+        </div>
+
+        <div class="stack-sm" v-else-if="payOrder">
+          <div class="qr-panel">
+            <div class="qr-frame">
+              <img :src="payOrder.qr_img" :alt="'支付宝支付二维码 ' + payOrder.out_trade_no">
+            </div>
+            <div class="qr-meta">
+              <div class="qr-amount">{{ sym }}{{ payOrder.amount }}<small> / {{ payOrder.days }} 天</small></div>
+              <div class="qr-status">
+                <span class="badge badge-dot badge-pulse badge-warning" v-if="payOrder.state === 'waiting'">等待支付</span>
+                <span class="badge badge-dot badge-success" v-else-if="payOrder.state === 'paid'">支付成功</span>
+                <span class="badge badge-dot badge-warning" v-else-if="payOrder.state === 'pending'">待管理员确认</span>
+                <span class="badge badge-dot badge-danger" v-else-if="payOrder.state === 'expired'">已超时</span>
+                <span v-if="payOrder.state === 'waiting'" class="text-faint">剩余 {{ payOrder.leftText }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="alert alert-info" style="display:block">
+            请用<b>支付宝</b>扫码支付，成功后本页面会自动更新。
+          </div>
+          <div class="row-between">
+            <span class="fs-xs text-faint break-all">订单号 {{ payOrder.out_trade_no }}</span>
+            <button class="btn btn-outline btn-sm" @click="closeSponsor">
+              {{ payOrder.state === 'paid' ? '完成' : '取消订单' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="stack-sm" v-else>
+          <button class="btn btn-accent btn-lg btn-block" v-if="pay.available"
+                  :disabled="!chosenTier" :class="{ 'is-loading': paying }" @click="startPay">
+            支付宝扫码支付
+          </button>
+          <button class="btn btn-primary btn-lg btn-block" v-else
+                  :disabled="!chosenTier" :class="{ 'is-loading': claiming }" @click="doClaim">
+            我已完成赞助，提交确认
+          </button>
+          <p class="fs-xs text-faint text-center" v-if="!pay.available">
+            站点未开启在线支付，请按站长说明完成赞助后回到这里确认。
+          </p>
+        </div>
+
+        <!-- 我的订单已移到本页独立的「我的订单」区块：
+             它原来长在这个弹窗里，而弹窗只有点某个入口才能打开 ——
+             入口一消失，订单和退款按钮就一起跟着看不见了。
+             订单/退款是付费用户的权利，必须**不依赖弹窗、也不依赖是否选中设备**。 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 退款申请弹窗 -->
+  <div class="modal-mask" v-if="refundTarget" @click.self="closeRefundApply">
+    <div class="modal modal-sm">
+      <div class="modal-hd">
+        <h3>申请退款</h3>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="closeRefundApply" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-bd">
+        <div class="kv-list mb-4">
+          <div class="kv"><span class="kv-k">套餐</span><span class="kv-v">{{ refundTarget.tier_name }}</span></div>
+          <div class="kv"><span class="kv-k">金额</span><span class="kv-v">{{ sym }}{{ refundTarget.amount }}</span></div>
+          <div class="kv"><span class="kv-k">订单号</span>
+            <span class="kv-v mono fs-xs">{{ refundTarget.out_trade_no }}</span></div>
+        </div>
+        <div class="field">
+          <label class="field-label">退款理由 <span class="req">*</span></label>
+          <textarea class="textarea" v-model.trim="refundReason" rows="4" maxlength="500"
+                    placeholder="请说明退款原因，例如：误操作重复购买、功能不符合预期…"></textarea>
+          <p class="field-hint">
+            至少 5 个字。提交后由站长审核，审核通过将原路退回并及时回收赞助权益。
+          </p>
+        </div>
+        <div class="field mt-3">
+          <label class="field-label">补充说明（选填）</label>
+          <input class="input" v-model.trim="refundDetail" maxlength="500" placeholder="可留空">
+        </div>
+        <div class="alert alert-info mt-4" style="display:block">
+          提交后不可撤销，如需撤回请联系站长。
+        </div>
+      </div>
+      <div class="modal-ft">
+        <button class="btn btn-ghost" @click="closeRefundApply">取消</button>
+        <button class="btn btn-primary" :class="{ 'is-loading': refundSending }"
+                @click="submitRefund">提交申请</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 页脚 ================= -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">
+            <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+            <div>
+              <b>{{ site.site_name || site.site_short || '夏诗意' }}</b>
+              <div class="fs-xs text-faint">OpenWrt 固件在线定制编译</div>
+              <div class="fs-xs text-faint" v-if="site.version">{{ site.version }}</div>
+            </div>
+          </div>
+          <p class="fs-sm text-muted" v-if="site.footer_text">{{ site.footer_text }}</p>
+        </div>
+
+        <div v-if="site.footer_moat_title">
+          <div class="footer-title">{{ site.footer_moat_title }}</div>
+          <div class="footer-moat">
+            <p v-if="site.footer_moat_text">{{ site.footer_moat_text }}</p>
+          </div>
+        </div>
+
+        <div>
+          <div class="footer-title">运行状态</div>
+          <div class="stack-sm fs-sm">
+            <div class="row-between"><span class="text-muted">收录设备</span><span>{{ devices.length }} 台</span></div>
+            <div class="row-between">
+              <span class="text-muted">构建后端</span>
+              <span>{{ site.build && site.build.effective === 'github' ? 'GitHub Actions' : '本机' }}</span>
+            </div>
+            <div class="row-between">
+              <span class="text-muted">链接有效期</span>
+              <span>{{ site['download.link_ttl_hours'] || 72 }} 小时</span>
+            </div>
+            <div class="row-between" v-if="site['sponsor.enabled']">
+              <span class="text-muted">赞助通道</span>
+              <span>
+                <span class="badge badge-success" v-if="pay.available">支付宝在线</span>
+                <span class="badge" v-else>人工确认</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>© {{ year }} {{ site.site_name || site.site_short || '夏诗意' }} · 保留所有权利</span>
+        <span v-if="site.icp_text">{{ site.icp_text }}</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/jquery.min.js"></script>
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/presets.js"></script>
+<script src="/assets/js/app.js"></script>
+</body>
+</html>

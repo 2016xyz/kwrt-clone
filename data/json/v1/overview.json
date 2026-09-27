@@ -1,0 +1,70 @@
+{
+  "latest": [
+    "25.12"
+  ],
+  "branches": {
+    "25.12": {
+      "enabled": true,
+      "extra_keys": [],
+      "extra_repos": {},
+      "git_branch": "openwrt-25.12",
+      "name": "25.12",
+      "path": "releases/25.12",
+      "path_packages": "packages-25.12",
+      "pubkey": null,
+      "repos": [
+        "base",
+        "packages",
+        "luci",
+        "routing",
+        "video",
+        "kiddin9"
+      ],
+      "snapshot": false,
+      "updates": "features",
+      "versions": "25.12",
+      "package_changes": [
+        {
+          "source": "luci-app-fileassistant",
+          "target": "luci-app-filemanager"
+        }
+      ],
+      "targets": {
+        "x86/64": "x86_64",
+        "x86/generic": "i386_pentium4",
+        "rockchip/armv8": "aarch64_generic",
+        "bcm27xx/bcm2711": "aarch64_cortex-a72",
+        "bcm27xx/bcm2712": "aarch64_cortex-a76",
+        "bcm27xx/bcm2710": "aarch64_cortex-a53",
+        "bcm27xx/bcm2709": "arm_cortex-a7_neon-vfpv4",
+        "bcm27xx/bcm2708": "arm_arm1176jzf-s_vfp",
+        "armsr/armv8": "aarch64_generic",
+        "mediatek/mt7622": "aarch64_cortex-a53",
+        "ramips/mt7621": "mipsel_24kc",
+        "ramips/mt7620": "mipsel_24kc",
+        "ramips/mt76x8": "mipsel_24kc",
+        "ipq40xx/generic": "arm_cortex-a7_neon-vfpv4",
+        "bcm53xx/generic": "arm_cortex-a9",
+        "mvebu/cortexa9": "arm_cortex-a9_vfpv3-d16",
+        "qualcommax/ipq60xx": "aarch64_cortex-a53",
+        "qualcommax/ipq807x": "aarch64_cortex-a53",
+        "qualcommax/ipq50xx": "aarch64_cortex-a53",
+        "airoha/an7581": "aarch64_cortex-a53",
+        "amlogic/meson8b": "arm_cortex-a5_vfpv4",
+        "amlogic/mesongx": "aarch64_cortex-a53",
+        "ipq806x/generic": "arm_cortex-a15_neon-vfpv4",
+        "sunxi/cortexa7": "arm_cortex-a7_neon-vfpv4",
+        "sunxi/cortexa53": "aarch64_cortex-a53",
+        "mediatek/filogic": "aarch64_cortex-a53",
+        "ath79/nand": "mips_24kc",
+        "siflower/sf21": "riscv64_generic",
+        "amlogic/meson": "aarch64_cortex-a53"
+      }
+    }
+  },
+  "server": {
+    "version": "0.7.19",
+    "contact": "mail@aparcar.org",
+    "allow_defaults": true
+  }
+}

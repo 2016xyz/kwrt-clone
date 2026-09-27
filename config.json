@@ -1,0 +1,36 @@
+{
+  "site": {
+    "name": "Kwrt(OpenWrt)软路由固件下载与在线定制编译",
+    "brand": "Kwrt",
+    "base_url": "",
+    "show_help": true,
+    "info_url": "/firmware/{target}/{id}/"
+  },
+  "builder": {
+    "enabled": true,
+    "backend": "imagebuilder",
+    "max_concurrent": 1,
+    "vip_concurrent": 2,
+    "queue_poll_hint_seconds": 1.5,
+    "download_default_version": {
+      "25.12": "25.12.5",
+      "24.10": "24.10.8"
+    },
+    "imagebuilder_mirrors": [
+      "https://downloads.openwrt.org/releases/{version}/targets/{target}/",
+      "https://mirror.sjtu.edu.cn/openwrt/releases/{version}/targets/{target}/",
+      "https://mirrors.aliyun.com/openwrt/releases/{version}/targets/{target}/"
+    ],
+    "extra_feeds": [],
+    "keep_workdir": false
+  },
+  "sponsor": {
+    "enabled": true,
+    "note": "赞助用户解锁：主机名/签名/根目录容量/文件系统/VMDK/ROOTFS/自定义文件包/去外链/USB无线网卡/无限插件数"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8443,
+    "session_name": "server_session"
+  }
+}

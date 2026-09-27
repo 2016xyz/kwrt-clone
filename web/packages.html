@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>软件库 · 夏诗意</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<div id="app" v-cloak>
+<div class="boot" v-if="!ready">
+  <div class="boot-spinner"></div>
+  <div class="fs-sm">正在载入软件库索引…</div>
+</div>
+
+  <!-- ============ 页头 ============ -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">
+        <img :src="site.logo_url || '/static/logo.svg'" :alt="site.site_short || '夏诗意'">
+        <span class="brand-text">{{ site.site_short || '夏诗意' }}</span>
+      </a>
+
+      <nav class="nav-links desktop" aria-label="主导航">
+        <a class="nav-link" href="/">固件定制</a>
+        <a class="nav-link on" href="/packages/">软件库</a>
+        <a class="nav-link" href="/newpkg/">插件提议</a>
+        <a class="nav-link" href="/fadian/">为爱发电</a>
+        <a class="nav-link" href="/contact/">联系</a>
+        <a class="nav-link" href="/admin/" v-if="user.is_admin">管理后台</a>
+      </nav>
+
+      <span class="spacer"></span>
+
+      <div class="nav-links">
+        <a class="btn btn-outline btn-sm" href="/login/" v-if="!user.logged_in">登录</a>
+        <a class="btn btn-ghost btn-sm" href="/login/" v-else>{{ user.username }}</a>
+      </div>
+      <theme-toggle></theme-toggle>
+      <button class="burger" @click="menu = true" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <template v-if="menu">
+    <div class="drawer-mask" @click="menu = false"></div>
+    <aside class="drawer" role="dialog" aria-label="导航菜单">
+      <div class="row-between mb-4">
+        <b>{{ site.site_short || '夏诗意' }}</b>
+        <button class="btn btn-ghost btn-icon btn-sm" @click="menu = false" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <a class="nav-link" href="/" @click="menu = false">固件定制</a>
+      <a class="nav-link on" href="/packages/" @click="menu = false">软件库</a>
+      <a class="nav-link" href="/newpkg/" @click="menu = false">插件提议</a>
+      <a class="nav-link" href="/fadian/" @click="menu = false">为爱发电</a>
+      <a class="nav-link" href="/contact/" @click="menu = false">联系</a>
+      <div class="divider"></div>
+      <a class="nav-link" href="/admin/" v-if="user.is_admin" @click="menu = false">管理后台</a>
+    </aside>
+  </template>
+
+  <main id="main" class="container" style="padding-top:var(--sp-8);padding-bottom:var(--sp-12)">
+
+    <div class="page-head">
+      <h1>自建软件库</h1>
+      <p class="text-muted">
+        本站交叉编译产出的软件包索引，按架构分组。共
+        <b class="text-primary">{{ archs.length }}</b> 个架构，
+        合计约 <b class="text-primary">{{ totalPkgs.toLocaleString() }}</b> 个包。
+      </p>
+    </div>
+
+    <!-- 筛选 -->
+    <div class="card card-pad-sm mb-6">
+      <div class="row-wrap gap-3">
+        <div class="field-inline">
+          <label class="field-label">版本</label>
+          <select class="select" v-model="relFilter">
+            <option value="">全部版本</option>
+            <option v-for="r in releases" :key="r" :value="r">{{ r }}</option>
+          </select>
+        </div>
+        <div class="field-inline" style="flex:1;min-width:220px">
+          <label class="field-label">搜索包名</label>
+          <div class="input-group">
+            <input class="input" v-model.trim="q" placeholder="如 luci-app-、wireguard、docker"
+                   @keyup.enter="doSearch">
+            <button class="btn btn-primary" :class="{ 'is-loading': searching }"
+                    :disabled="searching" @click="doSearch">搜索</button>
+          </div>
+        </div>
+        <div class="field-inline" v-if="archs.length">
+          <label class="field-label">架构</label>
+          <select class="select" v-model="cur" @change="doSearch">
+            <option v-for="a in filteredArchs" :key="a.src + '/' + a.arch" :value="a.src + '/' + a.arch">
+              {{ a.arch }}（{{ a.count.toLocaleString() }}）
+            </option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜索结果 -->
+    <div class="card mb-6" v-if="result">
+      <div class="card-hd">
+        <h4>搜索结果</h4>
+        <span class="badge" v-if="result.detail">{{ result.detail }}</span>
+        <span class="badge badge-info" v-else>
+          {{ result.count }} / {{ (result.matched || 0).toLocaleString() }} 条
+        </span>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr><th>包名</th><th>版本</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in result.packages" :key="p.name">
+              <td data-label="包名">
+                <span class="mono">{{ p.name }}</span>
+              </td>
+              <td data-label="版本"><span class="badge">{{ p.version }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-if="!result.packages.length">
+        <h4>没有匹配的软件包</h4>
+        <p class="text-muted">换个关键词试试，或清空搜索框查看该架构全部包。</p>
+      </div>
+      <div class="card-ft" v-if="result.truncated">
+        <span class="fs-sm text-muted">结果较多，仅显示前 {{ result.count }} 条。请细化关键词。</span>
+      </div>
+    </div>
+
+    <!-- 架构清单 -->
+    <div class="card">
+      <div class="card-hd">
+        <h4>架构索引</h4>
+        <span class="badge badge-info">{{ filteredArchs.length }} 个</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr><th>版本</th><th>架构</th><th class="num">包数量</th><th>索引文件</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in filteredArchs" :key="a.src + '/' + a.arch">
+              <td data-label="版本"><span class="badge">{{ a.release }}</span></td>
+              <td data-label="架构"><span class="mono">{{ a.arch }}</span></td>
+              <td class="num" data-label="包数量">{{ a.count.toLocaleString() }}</td>
+              <td data-label="索引文件">
+                <a class="btn btn-sm btn-outline" :href="a.url" target="_blank" rel="noopener">查看 JSON</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-if="!filteredArchs.length">
+        <h4>暂无索引</h4>
+        <p class="text-muted">本地尚未同步任何软件包索引。</p>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom" style="margin-top:0;border-top:0;padding-top:0">
+        <span>© {{ year }} {{ site.site_name || site.site_short || '夏诗意' }}</span>
+        <span class="row-wrap gap-3">
+          <a href="/">固件定制</a>
+          <a href="/newpkg/">插件提议</a>
+          <a href="/fadian/">为爱发电</a>
+          <a href="/contact/">联系</a>
+        </span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/packages.js"></script>
+</body>
+</html>

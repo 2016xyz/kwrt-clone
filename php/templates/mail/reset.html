@@ -1,0 +1,27 @@
+<p style="margin:0 0 14px;font-size:15px">你好 <b>{{username}}</b>：</p>
+<p style="margin:0 0 20px;color:#334155;line-height:1.75">
+  我们收到了重置 <b>{{site}}</b> 登录密码的请求。点击下面的按钮设置一个新密码。
+</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px">
+  <tr><td align="center" style="border-radius:8px;background:#b45309">
+    <a href="{{reset_url}}"
+       style="display:inline-block;padding:13px 30px;font-size:15px;font-weight:600;
+              color:#ffffff;text-decoration:none;border-radius:8px">
+      重置密码
+    </a>
+  </td></tr>
+</table>
+<p style="margin:0 0 8px;font-size:13px;color:#64748b;line-height:1.7">
+  按钮无法点击时，请把下面的地址复制到浏览器打开：
+</p>
+<p style="margin:0 0 18px;font-size:12px;color:#b45309;word-break:break-all;
+          line-height:1.6">{{reset_url}}</p>
+<p style="margin:0 0 18px;font-size:13px;color:#b45309;background:#fef3c7;
+          border:1px solid #fde68a;border-radius:8px;padding:11px 14px;line-height:1.7">
+  该链接 <b>{{ttl}} 小时内有效</b>，且只能使用一次。过期后请在找回密码页重新申请。
+</p>
+<p style="margin:0;font-size:13px;color:#64748b;line-height:1.75">
+  为了你的账号安全：<b>如果这不是你本人的操作，请直接忽略本邮件</b>——
+  你的密码不会有任何变化。若你怀疑账号已被他人尝试登录，建议重置密码后
+  检查登录记录。
+</p>

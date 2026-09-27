@@ -1,0 +1,22 @@
+<p style="margin:0 0 14px;font-size:15px">你好 <b>{{username}}</b>：</p>
+<p style="margin:0 0 20px;color:#334155;line-height:1.75">
+  感谢注册 <b>{{site}}</b>。请点击下面的按钮完成邮箱验证，验证后即可正常使用全部功能。
+</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px">
+  <tr><td align="center" style="border-radius:8px;background:#2563eb">
+    <a href="{{verify_url}}"
+       style="display:inline-block;padding:13px 30px;font-size:15px;font-weight:600;
+              color:#ffffff;text-decoration:none;border-radius:8px">
+      验证邮箱
+    </a>
+  </td></tr>
+</table>
+<p style="margin:0 0 8px;font-size:13px;color:#64748b;line-height:1.7">
+  按钮无法点击时，请把下面的地址复制到浏览器打开：
+</p>
+<p style="margin:0 0 18px;font-size:12px;color:#2563eb;word-break:break-all;
+          line-height:1.6">{{verify_url}}</p>
+<p style="margin:0;font-size:13px;color:#b45309;background:#fef3c7;
+          border:1px solid #fde68a;border-radius:8px;padding:11px 14px;line-height:1.7">
+  该链接 <b>{{ttl}} 小时内有效</b>，且只能使用一次。过期后请在登录页重新发送验证邮件。
+</p>
