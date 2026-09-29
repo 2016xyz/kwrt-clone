@@ -316,6 +316,31 @@
                       </div>
                     </td>
                   </tr>
+                  <!-- 失败任务错误详情（展开行） -->
+                  <tr v-if="b.status === 'failed'" :key="b.request_hash + '-err'"
+                      style="background:rgba(220,50,50,.06)">
+                    <td colspan="7" style="padding:.6rem 1rem">
+                      <div class="fs-xs" style="color:#c44">
+                        <b>失败原因</b>
+                        <span v-if="b.detail && b.detail !== 'tr-build-failed'"
+                              style="margin-left:.5rem">{{ b.detail }}</span>
+                      </div>
+                      <template v-if="b.stderr && b.stderr.trim()">
+                        <div class="fs-xs text-faint" style="margin:.3rem 0 2px">stderr：</div>
+                        <pre class="fs-xs" style="white-space:pre-wrap;word-break:break-word;max-height:14rem;overflow:auto;background:#1a1010;color:#f99;padding:.4rem .6rem;border-radius:4px;margin:0">{{ b.stderr.trim() }}</pre>
+                      </template>
+                      <template v-if="b.stdout && b.stdout.trim()">
+                        <details style="margin-top:.4rem">
+                          <summary class="fs-xs" style="cursor:pointer;color:#888">展开 stdout（构建完整日志）</summary>
+                          <pre class="fs-xs" style="white-space:pre-wrap;word-break:break-word;max-height:20rem;overflow:auto;background:#111;color:#bbb;padding:.4rem .6rem;border-radius:4px;margin-top:.3rem">{{ b.stdout.trim() }}</pre>
+                        </details>
+                      </template>
+                      <div class="fs-xs text-faint" style="margin-top:.3rem"
+                           v-if="!b.stderr && !b.stdout && (!b.detail || b.detail === 'tr-build-failed')">
+                        无详细日志（任务数据可能已被截断）
+                      </div>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>

@@ -627,7 +627,12 @@
             }
             return;
           }
-          if (r.status === 'failed') { K.toast('构建失败', 'error'); return; }
+          if (r.status === 'failed') {
+            // 取最有用的错误原因：detail > stderr 头200字 > 通用提示
+            const reason = r.detail || (r.stderr && r.stderr.trim().slice(-300)) || '请查看下方错误详情';
+            K.toast('构建失败：' + reason.slice(0, 120), 'error', 8000);
+            return;
+          }
           if (r.status === 'cancelled') return;
           schedulePoll(2000);
         } catch (e) {

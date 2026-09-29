@@ -1230,6 +1230,10 @@ def build_status(hash_: str):
         with db() as c:
             r = c.execute("SELECT * FROM builds WHERE request_hash=?", (hash_,)).fetchone()
         if r:
+            # 先从 jobs 表补充 stderr/stdout/detail
+            js = jobs.get(hash_)
+            if js:
+                return {k: v for k, v in js.items() if k != "req"}
             return {"request_hash": hash_, "status": r["status"], "detail": "unknown"}
         # 回退到构建引擎的持久化任务表
         js = jobs.get(hash_)
@@ -3351,12 +3355,46 @@ def admin_builds(request: Request, status: str = "", q: str = "", limit: int = 2
     q_ = builder.get_queue()
     with db() as c:
         rows = [dict(r) for r in c.execute(sql, args)]
+        # 合并 jobs 表的 stderr/stdout/detail（构建失败时展示详细原因）
+        hashes = [r["request_hash"] for r in rows]
+        job_results = {}
+        if hashes:
+            placeholders = ",".join("?" * len(hashes))
+            for jr in c.execute(
+                f"SELECT request_hash, status, detail, result FROM jobs WHERE request_hash IN ({placeholders})",
+                hashes
+            ):
+                jr = dict(jr)
+                result = {}
+                try:
+                    result = json.loads(jr.get("result") or "{}")
+                except Exception:
+                    pass
+                job_results[jr["request_hash"]] = {
+                    "detail": jr.get("detail") or result.get("detail", ""),
+                    "stderr": result.get("stderr", ""),
+                    "stdout": result.get("stdout", ""),
+                    "duration": result.get("duration"),
+                }
     for r in rows:
+        # 合入 jobs 表的详细字段
+        jr = job_results.get(r["request_hash"])
+        if jr:
+            r.setdefault("detail", jr["detail"])
+            r.setdefault("stderr", jr["stderr"])
+            r.setdefault("stdout", jr["stdout"])
+            if jr.get("duration") and not r.get("duration"):
+                r["duration"] = jr["duration"]
         j = q_.get(r["request_hash"])
         if j:
             r["live_status"] = j.get("status")
             r["imagebuilder_status"] = j.get("imagebuilder_status")
             r["files"] = len(j.get("files") or [])
+            # 运行中任务也能看到实时 stderr（部分输出）
+            if not r.get("stderr"):
+                r["stderr"] = j.get("stderr", "")
+            if not r.get("stdout"):
+                r["stdout"] = j.get("stdout", "")
         # 产物是否还在磁盘上：管理员单独删过产物后，记录仍在，
         # 但「产物」链接会指向已不存在的目录，需要据此隐藏。
         try:

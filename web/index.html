@@ -677,16 +677,25 @@
             </div>
 
             <template v-if="job.status === 'failed'">
-              <!-- ★ 这里原来写的是 job.error，而 job.error 在整个前端**从未被赋值** ——
-                   后端把失败原因写在 stderr（见 app/backends.py 的 _await_completion /
-                   app/builder.py 的失败返回），模板却读了另一个字段。
-                   后果：真实原因被丢掉，用户永远只看到「请稍后重试或更换软件包组合。」
-                   而像「此 profile 不在官方 ImageBuilder 里」这种失败，重试永远不会成功 ——
-                   这句兜底文案是在把人往错方向带。
-                   同理 job.log_tail 也从未赋值，原来那块「查看日志尾部」是死代码。 -->
               <div class="alert alert-danger mt-3" style="display:block">
                 <b>构建失败</b>
-                <pre class="fs-xs mt-2" style="white-space:pre-wrap;word-break:break-word">{{ job.stderr || job.error || job.detail || '（后端未返回失败原因，请到后台任务详情查看）' }}</pre>
+                <!-- 失败摘要：优先显示 detail，再 stderr 尾部 300 字 -->
+                <div class="fs-sm mt-1" v-if="job.detail && job.detail !== 'tr-build-failed'">{{ job.detail }}</div>
+                <!-- stderr：通常含 make 报错与依赖解析失败 -->
+                <template v-if="job.stderr && job.stderr.trim()">
+                  <div class="fs-xs text-faint mt-2" style="margin-bottom:2px">stderr（构建器输出）：</div>
+                  <pre class="fs-xs" style="white-space:pre-wrap;word-break:break-word;max-height:20rem;overflow:auto;background:#1a1a1a;color:#f88;padding:.5rem;border-radius:4px">{{ job.stderr.trim() }}</pre>
+                </template>
+                <!-- stdout：含 make image 过程，错误通常在末尾 -->
+                <template v-if="job.stdout && job.stdout.trim()">
+                  <details style="margin-top:.5rem">
+                    <summary class="fs-xs" style="cursor:pointer;color:#aaa">展开完整构建日志（stdout）</summary>
+                    <pre class="fs-xs" style="white-space:pre-wrap;word-break:break-word;max-height:30rem;overflow:auto;background:#111;color:#ccc;padding:.5rem;border-radius:4px;margin-top:.3rem">{{ job.stdout.trim() }}</pre>
+                  </details>
+                </template>
+                <!-- 兜底：两者都没有 -->
+                <div class="fs-xs text-faint mt-2"
+                     v-if="!job.stderr && !job.stdout">后端未返回错误详情，请到后台任务列表查看完整日志。</div>
               </div>
               <a class="btn btn-outline btn-sm btn-block mt-2" v-if="job.gh_run_url"
                  :href="job.gh_run_url" target="_blank" rel="noopener">在 GitHub 查看完整日志</a>
