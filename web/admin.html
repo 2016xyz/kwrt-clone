@@ -296,7 +296,8 @@
                   <th>任务</th><th>设备</th><th>版本</th><th>状态</th><th>耗时</th><th>时间</th><th class="actions">操作</th>
                 </tr></thead>
                 <tbody>
-                  <tr v-for="b in builds" :key="b.request_hash">
+                  <template v-for="b in builds" :key="b.request_hash">
+                  <tr>
                     <td data-label="任务" class="mono fs-xs">{{ b.request_hash.slice(0, 12) }}</td>
                     <td data-label="设备">
                       <div class="truncate" style="max-width:180px">{{ b.profile }}</div>
@@ -317,7 +318,7 @@
                     </td>
                   </tr>
                   <!-- 失败任务错误详情（展开行） -->
-                  <tr v-if="b.status === 'failed'" :key="b.request_hash + '-err'"
+                  <tr v-if="b.status === 'failed'"
                       style="background:rgba(220,50,50,.06)">
                     <td colspan="7" style="padding:.6rem 1rem">
                       <div class="fs-xs" style="color:#c44">
@@ -341,6 +342,7 @@
                       </div>
                     </td>
                   </tr>
+                  </template>
                 </tbody>
               </table>
             </div>
