@@ -80,10 +80,24 @@ def needs_third_party(packages):
 
 def pick_version(target, want=None, packages=None):
     """把站点版本号解析为可真实构建的官方 release；
-    若勾选了仅第三方源提供的插件而当前后端不支持，则回落到 opkg 后端（24.10）。"""
+    若勾选了仅第三方源提供的插件而当前后端不支持，则回落到 opkg 后端（24.10）。
+
+    回落前先检查目标平台在 24.10 是否存在，避免走到下载阶段才 404 报错。
+    """
     r = releases.resolve(want)
     if r["backend"] == "apk" and needs_third_party(packages):
         fallback = releases.resolve("24.10")
+        # 验证该 target 在 24.10 是否真实存在（qualcommax/ipq60xx 等仅 25.12 提供）
+        fb_profiles = imagebuilder_profiles(fallback["release"], target)
+        if fb_profiles is not None and len(fb_profiles) == 0:
+            tp_pkgs = [p for p in (packages or [])
+                       if any(p == k or p.startswith(k + " ") for k in THIRD_PARTY_ONLY)]
+            raise RuntimeError(
+                f"目标平台 {target} 在 {fallback['release']}（opkg 后端）中不存在，"
+                f"无法满足第三方插件 {tp_pkgs[:3]} 的需求。\n"
+                f"建议：去掉这些插件后使用 {r['release']}（apk 后端）构建，"
+                f"或选择支持该平台的其他插件组合。"
+            )
         print(f"[builder] 勾选插件需第三方 feed，版本回落 {r['release']} -> {fallback['release']}",
               flush=True)
         return fallback
@@ -481,10 +495,12 @@ def build(req, on_progress, request_hash=None, handle=None):
 
     target = req["target"]              # 例如 x86/64
     profile = req["profile"]
-    rinfo = releases.resolve(req.get("version") or req.get("branch"))
     packages = req.get("packages") or []
-    if rinfo["backend"] == "apk" and needs_third_party(packages):
-        rinfo = releases.resolve("24.10")          # 回落至具备第三方 feed 的后端
+    # 版本选择：统一走 pick_version（含第三方回落 + target 可用性检查）
+    try:
+        rinfo = pick_version(target, req.get("version") or req.get("branch"), packages)
+    except RuntimeError as e:
+        return {"status": "failed", "detail": str(e), "stdout": "", "stderr": str(e)}
     version = rinfo["release"]
     branch, backend = rinfo["branch"], rinfo["backend"]
     add, remove = normalize_packages(parse_pkg_list(packages), backend)
