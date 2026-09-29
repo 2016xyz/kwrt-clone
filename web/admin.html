@@ -149,6 +149,24 @@
                     </div>
                     <a class="btn btn-xs btn-outline" style="margin-top:.5rem" v-if="upd.html_url"
                        :href="upd.html_url" target="_blank" rel="noopener noreferrer">在 GitHub 查看</a>
+                    <button class="btn btn-xs btn-primary" style="margin-top:.5rem;margin-left:.5rem"
+                            @click="applyUpdate()"
+                            :disabled="upd.applying">
+                      {{ upd.applying ? '更新中…' : '一键更新' }}</button>
+                  </div>
+                </div>
+                <!-- 更新执行结果 -->
+                <div class="alert" v-if="upd.apply_result"
+                     :class="upd.apply_result.status === 'ok' ? 'alert-success' : 'alert-danger'"
+                     style="margin-top:.5rem">
+                  <div class="alert-title">{{ upd.apply_result.status === 'ok' ? '更新成功' : '更新失败' }}</div>
+                  <div class="fs-sm">{{ upd.apply_result.message }}</div>
+                  <div class="fs-xs text-faint pre-wrap" v-if="upd.apply_result.steps" style="margin-top:.3rem;max-height:12rem;overflow:auto">
+                    <div v-for="s in upd.apply_result.steps" :key="s.step">
+                      <span :class="s.ok ? 'text-success' : 'text-danger'">{{ s.ok ? '✓' : '✗' }}</span>
+                      {{ s.step }}
+                      <span v-if="s.stderr && !s.ok" class="text-danger">{{ s.stderr }}</span>
+                    </div>
                   </div>
                 </div>
                 <div class="alert alert-info" v-if="upd.checked && !upd.has_update && upd.status === 'ok'"

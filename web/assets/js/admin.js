@@ -71,6 +71,7 @@
         busy: false, checked: false, status: '', msg: '',
         current_display: '', latest_display: '', has_update: false,
         source: '', published_at: '', notes: '', html_url: '', cached: false,
+        applying: false, apply_result: null,
       });
 
       async function checkUpdate(force) {
@@ -97,6 +98,26 @@
         });
         upd.busy = false;
       }
+
+      async function applyUpdate() {
+        if (upd.applying) return;
+        if (!confirm('确认立即更新？将执行 git pull + 依赖安装 + 重启服务，期间服务会短暂中断。')) return;
+        upd.applying = true;
+        upd.apply_result = null;
+        await guard(async () => {
+          const d = await K.postForm('/api/v1/admin/update/apply', {});
+          upd.apply_result = d;
+          if (d.status === 'ok') {
+            toast(d.message || '更新成功', 'success');
+            // 重启后延迟刷新页面
+            setTimeout(() => location.reload(), 3000);
+          } else {
+            toast(d.message || '更新失败', 'error');
+          }
+        });
+        upd.applying = false;
+      }
+
       const mailReady = ref(false);
 
       const users = ref([]); const userQ = ref('');
@@ -832,7 +853,7 @@
       return {
         authChecked, isAdmin, me, site, tab, tabs, badges, loading, saving,
         ov, backend, mailReady, users, userQ, filteredUsers, userModal, sponsorModal,
-        upd, checkUpdate,
+        upd, checkUpdate, applyUpdate,
         builds, art, loadArtifacts, artAct, orphanAct,
         builds, tokens, tokenStats, claims, props, bans, logs, mailLog, mailTestTo,
         verifyStats, payInfo, payOrders, payFilter,
