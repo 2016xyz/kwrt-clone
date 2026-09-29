@@ -439,3 +439,94 @@ def _msg(r: dict) -> str:
     if r.get("has_update"):
         return f"发现新版本 {r.get('latest_display')}（当前 {r.get('current_display')}）"
     return f"已是最新版本 {r.get('current_display')}"
+
+
+# --------------------------------------------------------------------------- #
+# 一键更新（执行 git pull + 依赖安装 + 重启服务）
+# --------------------------------------------------------------------------- #
+import subprocess
+import shutil
+
+
+def _restart_service(steps: list) -> bool:
+    """尝试重启 systemd 服务，返回是否成功。"""
+    svc = "kwrt"
+    if not shutil.which("systemctl"):
+        steps.append({"step": "restart", "ok": False,
+                       "stderr": "无 systemctl，请手动重启"})
+        return False
+    try:
+        r = subprocess.run(
+            ["systemctl", "restart", svc],
+            capture_output=True, text=True, timeout=30)
+        steps.append({"step": "restart", "ok": r.returncode == 0,
+                       "stdout": r.stdout[-500:], "stderr": r.stderr[-500:]})
+        return r.returncode == 0
+    except Exception as e:
+        steps.append({"step": "restart", "ok": False, "stderr": str(e)})
+        return False
+
+
+def apply_update() -> dict:
+    """执行一键更新：git pull → pip install → 重启 systemd 服务。
+
+    返回 dict(status, message, steps)，steps 记录每一步的输出。
+    """
+    steps = []
+    root = ROOT
+
+    # 0. 前置检查
+    if not shutil.which("git"):
+        return {"status": "error", "message": "服务器未安装 git", "steps": steps}
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return {"status": "error", "message": "项目目录不是 git 仓库", "steps": steps}
+
+    # 1. git pull
+    try:
+        r = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=root, capture_output=True, text=True, timeout=120)
+        steps.append({"step": "git pull", "ok": r.returncode == 0,
+                       "stdout": r.stdout[-2000:], "stderr": r.stderr[-1000:]})
+        if r.returncode != 0:
+            return {"status": "error",
+                    "message": f"git pull 失败：{r.stderr[-300:]}",
+                    "steps": steps}
+    except Exception as e:
+        steps.append({"step": "git pull", "ok": False, "stderr": str(e)})
+        return {"status": "error", "message": f"git pull 异常：{e}", "steps": steps}
+
+    # 2. pip install（找 venv）
+    vpy = None
+    for cand in [os.path.join(root, ".venv", "bin", "python"),
+                 os.path.join(root, "venv", "bin", "python")]:
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            vpy = cand
+            break
+
+    if vpy and os.path.isfile(os.path.join(root, "requirements.txt")):
+        try:
+            r = subprocess.run(
+                [vpy, "-m", "pip", "install", "-q",
+                 "-r", os.path.join(root, "requirements.txt"),
+                 "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"],
+                cwd=root, capture_output=True, text=True, timeout=300)
+            steps.append({"step": "pip install", "ok": r.returncode == 0,
+                           "stdout": r.stdout[-1000:], "stderr": r.stderr[-1000:]})
+        except Exception as e:
+            steps.append({"step": "pip install", "ok": False, "stderr": str(e)})
+    else:
+        steps.append({"step": "pip install", "ok": True,
+                       "stdout": "跳过（未找到 venv 或 requirements.txt）"})
+
+    # 3. 重启服务
+    restarted = _restart_service(steps)
+    clear_cache()
+
+    if restarted:
+        return {"status": "ok",
+                "message": "更新成功，服务正在重启",
+                "steps": steps}
+    return {"status": "ok",
+            "message": "代码已更新，但未能自动重启服务（请手动重启）",
+            "steps": steps}
