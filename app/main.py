@@ -3093,8 +3093,9 @@ def admin_update_check(request: Request, force: int = 0):
 def admin_update_apply(request: Request):
     """一键更新：git pull + 装依赖 + 重启服务。仅管理员可用。"""
     require_admin(request)
+    u = is_admin(request)
     result = update.apply_update()
-    audit(is_admin(request)["username"], "update_apply",
+    audit((u or {}).get("username", "admin"), "update_apply",
           detail=result.get("message", ""))
     return JSONResponse(result)
 

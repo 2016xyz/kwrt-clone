@@ -855,7 +855,7 @@
         ov, backend, mailReady, users, userQ, filteredUsers, userModal, sponsorModal,
         upd, checkUpdate, applyUpdate,
         builds, art, loadArtifacts, artAct, orphanAct,
-        builds, tokens, tokenStats, claims, props, bans, logs, mailLog, mailTestTo,
+        tokens, tokenStats, claims, props, bans, logs, mailLog, mailTestTo,
         verifyStats, payInfo, payOrders, payFilter,
         refunds, refundFilter, refundStats, refundModal, refundNote, refundOffline,
         loadRefunds, openRefund, closeRefund, refundAct, refundStatusBadge,

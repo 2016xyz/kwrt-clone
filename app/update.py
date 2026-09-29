@@ -26,7 +26,10 @@ import base64
 import json
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -444,12 +447,16 @@ def _msg(r: dict) -> str:
 # --------------------------------------------------------------------------- #
 # 一键更新（执行 git pull + 依赖安装 + 重启服务）
 # --------------------------------------------------------------------------- #
-import subprocess
-import shutil
+
+_UPDATE_LOCK = threading.Lock()
 
 
 def _restart_service(steps: list) -> bool:
-    """尝试重启 systemd 服务，返回是否成功。"""
+    """尝试重启 systemd 服务，返回是否成功。
+
+    ★ 重启会终止当前进程，所以这个函数可能不会返回。
+    前端已做好 3 秒后自动刷新的逻辑来兜底。
+    """
     svc = "kwrt"
     if not shutil.which("systemctl"):
         steps.append({"step": "restart", "ok": False,
@@ -471,7 +478,18 @@ def apply_update() -> dict:
     """执行一键更新：git pull → pip install → 重启 systemd 服务。
 
     返回 dict(status, message, steps)，steps 记录每一步的输出。
+    加锁防止并发执行（多个管理员同时点击）。
     """
+    if not _UPDATE_LOCK.acquire(blocking=False):
+        return {"status": "error", "message": "另一个更新正在执行中，请稍后再试", "steps": []}
+
+    try:
+        return _do_apply()
+    finally:
+        _UPDATE_LOCK.release()
+
+
+def _do_apply() -> dict:
     steps = []
     root = ROOT
 
@@ -481,10 +499,16 @@ def apply_update() -> dict:
     if not os.path.isdir(os.path.join(root, ".git")):
         return {"status": "error", "message": "项目目录不是 git 仓库", "steps": steps}
 
-    # 1. git pull
+    # 1. git pull（指定 origin + 当前分支，避免歧义）
     try:
+        # 先获取当前分支名
+        br = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=root, capture_output=True, text=True, timeout=10)
+        branch = br.stdout.strip() or "main"
+
         r = subprocess.run(
-            ["git", "pull", "--ff-only"],
+            ["git", "pull", "--ff-only", "origin", branch],
             cwd=root, capture_output=True, text=True, timeout=120)
         steps.append({"step": "git pull", "ok": r.returncode == 0,
                        "stdout": r.stdout[-2000:], "stderr": r.stderr[-1000:]})

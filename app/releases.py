@@ -46,7 +46,7 @@ def supported_releases():
         with open(cache, "w", encoding="utf-8") as f:
               json.dump(_SUPPORTED, f)
     except Exception:
-        _SUPPORTED = list(BRANCH_RELEASE.values())[:1] and [v[1] for v in BRANCH_RELEASE.values()]
+        _SUPPORTED = [v[1] for v in BRANCH_RELEASE.values()]
     return _SUPPORTED
 
 
