@@ -49,7 +49,8 @@ from . import (builder, jobs, releases, sitesettings as SS, mailer, dl, backends
                reset, pay, refund, pkgcatalog, params, artifacts, dbutil, update)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CFG = json.load(open(os.path.join(ROOT, "config.json")))
+with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as _cf:
+    CFG = json.load(_cf)
 WEB = os.path.join(ROOT, "web")
 DATA = os.path.join(ROOT, "data")
 STORE = os.path.join(ROOT, "store")

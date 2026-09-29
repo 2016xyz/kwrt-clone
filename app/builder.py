@@ -30,7 +30,8 @@ from . import releases
 from . import params, prefetch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CFG = json.load(open(os.path.join(ROOT, "config.json")))
+with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as _cf:
+    CFG = json.load(_cf)
 BUILD = CFG["builder"]
 
 WORK = os.path.join(ROOT, "work")
@@ -413,7 +414,8 @@ def ensure_repositories(ib, branch, release, arch, backend):
                 if f not in txt:
                     txt += line
             txt = txt.replace("option check_signature", "# option check_signature")
-            open(conf, "w").write(txt)
+            with open(conf, "w") as _wf:
+                _wf.write(txt)
             print(f"[builder] 已接入第三方源 {feeds}（签名校验已关闭）", flush=True)
 
 
@@ -440,7 +442,8 @@ def apply_filesystem(ib, filesystem):
                            else "CONFIG_TARGET_ROOTFS_SQUASHFS=y")
             else:
                 out.append(l)
-        open(cfg, "w").write("\n".join(out) + "\n")
+        with open(cfg, "w") as _wf:
+            _wf.write("\n".join(out) + "\n")
         print(f"[builder] 文件系统收敛: {'ext4' if want_ext4 else 'squashfs'}", flush=True)
     except Exception as e:
         print("[builder] apply_filesystem failed:", e, flush=True)
@@ -659,8 +662,9 @@ def _installed_ips(ib, target):
             for n in names:
                 if n.endswith(".manifest"):
                     try:
-                        for line in open(os.path.join(dirpath, n)):
-                            out.append(line.split(" - ")[0].strip() + ".ipk")
+                        with open(os.path.join(dirpath, n)) as _mf:
+                            for line in _mf:
+                                out.append(line.split(" - ")[0].strip() + ".ipk")
                     except Exception:
                         pass
     return out

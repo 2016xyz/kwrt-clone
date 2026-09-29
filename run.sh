@@ -3,13 +3,26 @@
 set -e
 cd "$(dirname "$0")"
 
-# 依赖检查（RHEL/CentOS 系）
-need_rpm="perl-FindBin perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece zstd make gcc gawk unzip"
-for p in $need_rpm; do rpm -q "$p" >/dev/null 2>&1 || MISS="$MISS $p"; done
-if [ -n "$MISS" ]; then
-  echo "[!] 缺少构建依赖:$MISS"
-  echo "    请执行: dnf install -y$MISS"
-  exit 1
+# 依赖检查
+MISS=""
+if command -v rpm >/dev/null 2>&1; then
+  need_rpm="perl-FindBin perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece zstd make gcc gawk unzip"
+  for p in $need_rpm; do rpm -q "$p" >/dev/null 2>&1 || MISS="$MISS $p"; done
+  if [ -n "$MISS" ]; then
+    echo "[!] 缺少构建依赖:$MISS"
+    echo "    请执行: dnf install -y$MISS"
+    exit 1
+  fi
+elif command -v dpkg >/dev/null 2>&1; then
+  need_deb="perl squashfs-tools zstd make gcc gawk unzip tar"
+  for p in $need_deb; do dpkg -s "$p" >/dev/null 2>&1 || MISS="$MISS $p"; done
+  if [ -n "$MISS" ]; then
+    echo "[!] 缺少构建依赖:$MISS"
+    echo "    请执行: sudo apt-get install -y$MISS"
+    exit 1
+  fi
+else
+  echo "[!] 未识别包管理器（需要 rpm 或 dpkg），跳过依赖检查"
 fi
 
 # ---------------------------------------------------------------------------

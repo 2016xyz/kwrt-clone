@@ -10,6 +10,8 @@ users.db-shm
 *.sqlite
 *.sqlite3
 *.db
+kwrt.env
+data/INITIAL_ADMIN.txt
 
 # ---- 本地配置覆盖（config.json 本身不含凭据，可入库；
 #      但允许用 *.local.json 覆盖，这类文件不入库）----
