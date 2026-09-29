@@ -3465,14 +3465,25 @@ async def admin_build_op(request: Request, request_hash: str = Form(...), action
 
     if action == "cancel":
         if not job:
-            return JSONResponse({"status": "error", "detail": "任务不在队列中（已结束或已重启）"},
-                                status_code=404)
-        if job.get("status") in ("done", "failed"):
+            # 任务不在内存队列（服务重启后丢失），尝试从持久化表补救
+            js = jobs.get(request_hash)
+            db_status = (row["status"] if row else None) or (js.get("status") if js else None)
+            if db_status in ("done", "failed", "cancelled"):
+                return JSONResponse({"status": "error", "detail": "任务已结束，无法取消"}, status_code=400)
+            # 直接把数据库状态标记为 cancelled（内存队列里已不存在，无需 kill 进程）
+            with db() as c:
+                c.execute("UPDATE builds SET status='cancelled' WHERE request_hash=?", (request_hash,))
+            if js:
+                jobs.put({**js, "status": "cancelled"})
+            audit((a or {}).get("username", "admin"), "cancel_build", request_hash,
+                  "cancelled=db_only(not_in_queue)", ip)
+            return {"status": "ok", "cancelled": True, "note": "任务不在内存队列，已标记为已取消"}
+        if job.get("status") in ("done", "failed", "cancelled"):
             return JSONResponse({"status": "error", "detail": "任务已结束，无法取消"}, status_code=400)
         ok = q.cancel(request_hash)
         with db() as c:
             c.execute("UPDATE builds SET status='cancelled' WHERE request_hash=?", (request_hash,))
-        audit(a["username"], "cancel_build", request_hash, f"cancelled={ok}", ip)
+        audit((a or {}).get("username", "admin"), "cancel_build", request_hash, f"cancelled={ok}", ip)
         return {"status": "ok", "cancelled": ok}
 
     if action == "retry":
