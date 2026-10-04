@@ -197,10 +197,16 @@ def main() -> int:
 
     # 页面必须真的引用它们，否则「装了也是白装」
     pg = http("/")[1]
+    # ★ 先把判定抽成变量再进 f-string：f-string 的表达式部分里不允许出现反斜杠
+    #   （Python 3.12 才放宽），而本项目的运行环境是 Python 3.9 ——
+    #   原先写成 f"{'有' if 'rel=\"manifest\"' in pg else '无'}" 会让整个文件
+    #   在 3.9 下直接 SyntaxError，检查器自己先挂了。
+    _has_manifest = 'rel="manifest"' in pg
+    _has_sw = "serviceWorker.register" in pg
     rec("P-4c", "页面注入 manifest 链接与 Service Worker 注册",
-        'rel="manifest"' in pg and "serviceWorker.register" in pg,
-        f"manifest 链接={'有' if 'rel=\"manifest\"' in pg else '无'} "
-        f"SW 注册={'有' if 'serviceWorker.register' in pg else '无'}")
+        _has_manifest and _has_sw,
+        f"manifest 链接={'有' if _has_manifest else '无'} "
+        f"SW 注册={'有' if _has_sw else '无'}")
 
     # ---------------------------------------------------------------- P-5 无回归
     bad = []
