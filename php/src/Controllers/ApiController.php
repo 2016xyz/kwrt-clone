@@ -177,7 +177,10 @@ final class ApiController
             json_out(['status' => 'error', 'detail' => '本站未开启赞助'], 400);
         }
         $tier = trim((string) input('tier', ''));
-        $amount = (float) input('amount', 0);
+        [$amount, $aerr] = Sponsor::parseAmount(input('amount', ''));
+        if ($aerr !== '') {
+            json_out(['status' => 'error', 'detail' => $aerr], 400);
+        }
         [$choice, $err] = Sponsor::resolve($tier, $amount);
         if ($choice === null) {
             json_out(['status' => 'error', 'detail' => $err], 400);
@@ -237,8 +240,14 @@ final class ApiController
             echo json_encode(['status' => 'error', 'detail' => '请先登录'], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        $amount = (float) input('amount', 0);
-        if (!is_finite($amount) || $amount <= 0) {
+        [$amount, $aerr] = Sponsor::parseAmount(input('amount', ''));
+        if ($aerr !== '') {
+            http_response_code(400);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => $aerr], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($amount <= 0) {
             http_response_code(400);
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['status' => 'error', 'detail' => '缺少金额参数'], JSON_UNESCAPED_UNICODE);
@@ -925,7 +934,10 @@ final class ApiController
             json_out(['status' => 'error', 'detail' => '请先登录'], 401);
         }
         $tierName = trim((string) input('tier', ''));
-        $reqAmount = (float) input('amount', 0);
+        [$reqAmount, $aerr] = Sponsor::parseAmount(input('amount', ''));
+        if ($aerr !== '') {
+            json_out(['status' => 'error', 'detail' => $aerr], 400);
+        }
         // ★ 金额与天数的真值一律由 Sponsor::resolve() 决定：
         //     选套餐 → 用套餐里的 amount/days，前端传什么都不看；
         //     自定义金额 → amount 取用户的申报值（要的就是这个），

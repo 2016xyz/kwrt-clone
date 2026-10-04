@@ -66,6 +66,31 @@ final class Sponsor
     }
 
     /**
+     * 把前端传上来的金额解析成 float，返回 [值, 错误信息]。
+     *
+     * 与 Python 的 app/main.py::_parse_amount 同规则：空串视为 0，非数字给人话，
+     * NaN/Inf 也算非法 —— `(float) "abc"` 在 PHP 里会静默变成 0.0，然后报出
+     * "金额不能低于 1" 这种指错方向的信息。
+     *
+     * @return array{0:float,1:string}
+     */
+    public static function parseAmount(mixed $raw): array
+    {
+        $s = trim((string) ($raw ?? ''));
+        if ($s === '') {
+            return [0.0, ''];
+        }
+        if (!is_numeric($s)) {
+            return [0.0, '金额必须是数字'];
+        }
+        $v = (float) $s;
+        if (!is_finite($v)) {
+            return [0.0, '金额必须是有限数字'];
+        }
+        return [$v, ''];
+    }
+
+    /**
      * 解析用户的选择。
      *
      * @param float $amount 用户申报的金额（仅在未选套餐时生效）

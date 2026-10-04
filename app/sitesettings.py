@@ -743,7 +743,9 @@ def cross_check(payload):
         if kind == "text" and not txt.strip():
             warnings["sponsor.qr_text"] = ("「收款码来源」选了 text，但「收款码内容 / 链接」为空 —— "
                                            "用户点击生成收款码时会失败，请填写内容或改回 image")
-        if kind == "text" and "{amount}" not in txt:
+        elif kind == "text" and "{amount}" not in txt:
+            # ★ 必须是 elif：两条都命中时后者会覆盖前者，
+            #   于是"内容为空"被报成"缺 {amount} 占位符"，指错了要改的地方。
             warnings["sponsor.qr_text"] = ("「收款码内容」里没有 {amount} 占位符 —— "
                                            "生成的收款码不会带上用户输入的金额")
     return {"blocked": blocked, "warnings": warnings}

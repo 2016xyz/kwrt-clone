@@ -2107,7 +2107,7 @@ def sponsor_tiers():
 
 
 @app.post("/api/v1/sponsor/order")
-def sponsor_order(request: Request, tier: str = Form(""), amount: float = Form(0)):
+def sponsor_order(request: Request, tier: str = Form(""), amount: str = Form("")):
     """统一下单入口 —— 用户在赞助页**输入金额（或选套餐）点击**后调用。
 
     返回的 `mode` 决定前端拿到的是哪种"收款码图片地址"：
@@ -2185,7 +2185,7 @@ def sponsor_order(request: Request, tier: str = Form(""), amount: float = Form(0
 
 
 @app.get("/api/v1/sponsor/qr.png")
-def sponsor_qr(request: Request, amount: float = 0):
+def sponsor_qr(request: Request, amount: str = ""):
     """★ 「收款码图片地址」的服务端入口 —— 用户输入金额点击后，前端直接把它当图片加载。
 
       kind=image → 302 跳到站长填的固定图片地址（不重复渲染，也不做代理）；
@@ -2197,12 +2197,9 @@ def sponsor_qr(request: Request, amount: float = 0):
     u = current_user(request)
     if not u:
         return JSONResponse({"detail": "请先登录"}, status_code=401)
-    try:
-        amt = float(amount or 0)
-    except (TypeError, ValueError):
-        return JSONResponse({"detail": "金额必须是数字"}, status_code=400)
-    if amt != amt or amt in (float("inf"), float("-inf")):
-        return JSONResponse({"detail": "金额必须是有限数字"}, status_code=400)
+    amt, perr = _parse_amount(amount)
+    if perr:
+        return JSONResponse({"detail": perr}, status_code=400)
     if amt <= 0:
         return JSONResponse({"detail": "缺少金额参数"}, status_code=400)
     lo, hi = _amount_range()
@@ -2226,7 +2223,7 @@ def sponsor_qr(request: Request, amount: float = 0):
 
 
 @app.post("/api/v1/sponsor/claim")
-def sponsor_claim(request: Request, tier: str = Form(""), amount: float = Form(0),
+def sponsor_claim(request: Request, tier: str = Form(""), amount: str = Form(""),
                   note: str = Form(""), email: str = Form("")):
     """
     用户声明已完成赞助（选了套餐，或输入了自定义金额）。
@@ -2373,7 +2370,26 @@ def _custom_days(amount: float) -> int:
     return max(1, min(days, 3650))
 
 
-def _resolve_sponsor_choice(tier: str, amount: float):
+def _parse_amount(raw):
+    """把前端传上来的金额解析成 float，返回 (值, 错误信息)。成功时错误信息为空串。
+
+    ★ 为什么不直接让 FastAPI 用 `amount: float = Form(0)` 接收：
+      那样非数字入参会变成 422 + 一段 FastAPI 自己的英文校验报文
+      （`[{"type":"float_parsing","loc":["body","amount"],...}]`），
+      前端只能把它挤成一句天书。金额是用户手输的，最该给人话的地方就在这里。
+    """
+    if raw is None or str(raw).strip() == "":
+        return 0.0, ""
+    try:
+        amt = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0.0, "金额必须是数字"
+    if amt != amt or amt in (float("inf"), float("-inf")):
+        return 0.0, "金额必须是有限数字"
+    return amt, ""
+
+
+def _resolve_sponsor_choice(tier: str, amount):
     """把用户的选择解析成 ((金额, 天数, 套餐名), "") 或 (None, 错误信息)。
 
     ★ 天数**永远由服务端算**：选套餐走套餐的 days，自定义金额走 _custom_days()。
@@ -2397,12 +2413,9 @@ def _resolve_sponsor_choice(tier: str, amount: float):
     if not bool(SS.get("sponsor.custom_amount")):
         return None, "本站未开放自定义金额，请从页面列出的套餐中选择"
 
-    try:
-        amt = float(amount or 0)
-    except (TypeError, ValueError):
-        return None, "金额必须是数字"
-    if amt != amt or amt in (float("inf"), float("-inf")):
-        return None, "金额必须是有限数字"
+    amt, perr = _parse_amount(amount)
+    if perr:
+        return None, perr
     lo, hi = _amount_range()
     if amt < lo:
         return None, f"金额不能低于 {lo}"
