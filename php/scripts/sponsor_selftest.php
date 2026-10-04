@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 $SRC = dirname(__DIR__) . '/src';
 require $SRC . '/helpers.php';
-spl_autoload_register(static function (string $c): void {
+spl_autoload_register(static function (string $c) use ($SRC): void {
     if (!str_starts_with($c, 'Kwrt\\')) {
         return;
     }
