@@ -676,6 +676,16 @@
               邮件通知未送达：{{ job.mail_status.detail }}
             </div>
 
+            <!-- 开发版/新设备构建时，官方源没有的插件被自动忽略，如实告知 -->
+            <div class="alert alert-warning fs-sm mt-3" style="display:block" v-if="job.warning">
+              <b>部分插件已忽略</b>
+              <div class="fs-xs mt-1">{{ job.warning }}</div>
+              <div class="fs-xs text-faint mt-1" v-if="job.version === 'SNAPSHOT'">
+                开发版（SNAPSHOT）为 apk 后端，暂无第三方插件源；如必须使用这些插件，
+                请改用 24.10 分支并选择该分支支持的设备。
+              </div>
+            </div>
+
             <template v-if="job.status === 'failed'">
               <div class="alert alert-danger mt-3" style="display:block">
                 <b>构建失败</b>

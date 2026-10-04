@@ -243,11 +243,26 @@ class GitHubBackend:
         if defaults_raw:
             import base64 as _b64
             defaults_b64 = _b64.b64encode(defaults_raw.encode("utf-8")).decode("ascii")
+        # 版本解析下沉到派发前：把「第三方插件回落 24.10」「新设备回落 SNAPSHOT」
+        # 在本地算清楚，workflow 只按最终 release 构建。失败时立即返回，不派发。
+        try:
+            rinfo = builder.pick_version(
+                req.get("target", ""), str(req.get("version") or ""),
+                req.get("packages") or [], profile=req.get("profile", ""))
+            eff_version = rinfo["release"]
+        except RuntimeError as e:
+            return {"status": "failed", "stdout": "", "detail": str(e), "stderr": str(e)}
+        # apk 后端（SNAPSHOT / 25.12）无第三方 feed：剔除官方源没有的包，
+        # 让设备仍能编出固件，并把被忽略的插件如实回传。
+        pkgs = list(req.get("packages") or [])
+        dropped = []
+        if rinfo["backend"] == "apk":
+            pkgs, dropped = builder.filter_unavailable(eff_version, req.get("target", ""), pkgs)
         inputs = {
             "target": req.get("target", ""),
             "profile": req.get("profile", ""),
-            "packages": " ".join(req.get("packages") or []),
-            "version": str(req.get("version") or ""),
+            "packages": " ".join(pkgs),
+            "version": eff_version,
             "defaults": defaults_b64,
             "filesystem": req.get("filesystem") or "squashfs",
             "rootfs_size_mb": str(req.get("rootfs_size_mb") or 512),
@@ -280,8 +295,14 @@ class GitHubBackend:
                     "external": True, "gh_workflow": workflow}
 
         on_progress("running", f"GitHub run #{run_id} 已启动，等待构建完成…")
-        return self._await_completion(run_id, on_progress,
-                                      request_hash=(handle or {}).get("request_hash"))
+        res = self._await_completion(run_id, on_progress,
+                                     request_hash=(handle or {}).get("request_hash"))
+        # 把「已忽略的不可用插件」如实带回，前端据此提示管理员/用户
+        if dropped and isinstance(res, dict):
+            res["dropped_packages"] = dropped
+            res["warning"] = (f"{eff_version} 官方源中不存在以下插件，已自动忽略："
+                              + "、".join(dropped))
+        return res
 
     def _await_run(self, workflow, ref, on_progress, tries=12):
         """派发后 GitHub 需要几秒才创建 run，轮询找出本次 run。

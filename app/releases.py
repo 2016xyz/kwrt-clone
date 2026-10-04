@@ -14,6 +14,15 @@ BRANCH_RELEASE = {
     "23.05": ("23.05", "23.05.6", "opkg"),
 }
 
+# SNAPSHOT 开发版：滚动构建，含最新设备（JDCloud ipq60xx 等稳定版未收录的设备）
+# 用 apk 后端；无版本号路径（snapshots/targets/{target}/）
+SNAPSHOT = {
+    "branch": "snapshot",
+    "release": "SNAPSHOT",
+    "backend": "apk",
+    "is_snapshot": True,
+}
+
 # 第三方源（kiddin9 feed）随 release 提供；缺失则跳过
 THIRD_PARTY = {
     "opkg": ["https://dl.openwrt.ai/packages-{branch}/{arch}/kiddin9"],
@@ -53,10 +62,13 @@ def supported_releases():
 def resolve(branch_or_version, prefer=None):
     """
     返回 dict(branch, release, backend)。
-    branch_or_version 可为 '25.12'（分支）或 '25.12.5'（具体版本）。
+    branch_or_version 可为 '25.12'（分支）、'25.12.5'（具体版本）、'snapshot'（开发版）。
     """
     v = (branch_or_version or "").strip()
     if v:
+        # SNAPSHOT 开发版（含稳定版尚未收录的新设备）
+        if v.lower() == "snapshot":
+            return dict(SNAPSHOT)
         for b, (major, rel, backend) in BRANCH_RELEASE.items():
             # 只接受「分支名」「发布号」以及本分支下的具体补丁版本
             # （如 25.12.5）。原用 v.startswith(major + ".") 会把
@@ -70,6 +82,18 @@ def resolve(branch_or_version, prefer=None):
     b = sorted(BRANCH_RELEASE.keys(), reverse=True)[0]
     major, rel, backend = BRANCH_RELEASE[b]
     return {"branch": b, "release": rel, "backend": backend}
+
+
+def is_snapshot(r) -> bool:
+    """该 release 是否为 SNAPSHOT 开发版。"""
+    if not r:
+        return False
+    return bool(r.get("is_snapshot") or r.get("branch") == "snapshot")
+
+
+def snapshot() -> dict:
+    """返回 SNAPSHOT 开发版的 release 定义（副本）。"""
+    return dict(SNAPSHOT)
 
 
 def third_party_feeds(branch, arch, backend):

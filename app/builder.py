@@ -15,12 +15,14 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
 import tarfile
 import zipfile
 import time
+import urllib.error
 import urllib.request
 import gzip
 from concurrent.futures import ThreadPoolExecutor
@@ -71,6 +73,30 @@ THIRD_PARTY_ONLY = (
     "luci-theme-argon", "luci-app-argon-config",
 )
 
+# --------------------------------------------------------------------------- #
+# SNAPSHOT 开发版
+#
+# 稳定版（25.12.5 等）不收录仍在开发中的新设备（如 JDCloud ipq60xx 系列），
+# 这些设备只存在于 SNAPSHOT 滚动构建里。当用户所选设备在稳定版 ImageBuilder
+# 中不存在、但在 SNAPSHOT 中存在时，自动使用 SNAPSHOT 构建。
+#
+# 与稳定版的差异：
+#   · 路径无版本号：snapshots/targets/{target}/（而非 releases/{ver}/targets/{target}/）
+#   · 文件名无版本号：openwrt-imagebuilder-{target}.Linux-x86_64.tar.zst
+#   · 包后端为 apk（同 25.12）；第三方源（kiddin9）暂不提供 apk 索引
+# --------------------------------------------------------------------------- #
+SNAPSHOT_RELEASE = releases.SNAPSHOT["release"]          # "SNAPSHOT"
+SNAPSHOT_MIRRORS = [
+    "https://downloads.openwrt.org/snapshots/targets/{target}/",
+]
+
+
+def _ib_url_templates(release):
+    """按 release 选镜像模板。SNAPSHOT 用 snapshots 路径（无版本号）。"""
+    if release == SNAPSHOT_RELEASE:
+        return SNAPSHOT_MIRRORS
+    return BUILD["imagebuilder_mirrors"]
+
 
 def needs_third_party(packages):
     """请求中是否包含只有第三方 feed 才有的插件。"""
@@ -78,29 +104,58 @@ def needs_third_party(packages):
                for p in (packages or []))
 
 
-def pick_version(target, want=None, packages=None):
-    """把站点版本号解析为可真实构建的官方 release；
-    若勾选了仅第三方源提供的插件而当前后端不支持，则回落到 opkg 后端（24.10）。
+def pick_version(target, want=None, packages=None, profile=None):
+    """把站点请求解析为可真实构建的 release。
 
-    回落前先检查目标平台在 24.10 是否存在，避免走到下载阶段才 404 报错。
+    候选按优先级排列，取第一个「确实包含该设备(profile)」的 release：
+      1. 24.10（opkg）—— 唯一提供第三方 feed（kiddin9）的后端
+      2. 用户所选版本（如 25.12）
+      3. SNAPSHOT 开发版 —— 收录稳定版尚未发布的新设备（JDCloud ipq60xx 等）
+
+    判定依据是 upstream profiles.json（404=确认不存在→空集；网络故障=未知→放行）。
+    全都放不下时抛出含建议的 RuntimeError，避免走到下载/编译阶段才失败。
     """
     r = releases.resolve(want)
-    if r["backend"] == "apk" and needs_third_party(packages):
-        fallback = releases.resolve("24.10")
-        # 验证该 target 在 24.10 是否真实存在（qualcommax/ipq60xx 等仅 25.12 提供）
-        fb_profiles = imagebuilder_profiles(fallback["release"], target)
-        if fb_profiles is not None and len(fb_profiles) == 0:
-            tp_pkgs = [p for p in (packages or [])
-                       if any(p == k or p.startswith(k + " ") for k in THIRD_PARTY_ONLY)]
+    tp = needs_third_party(packages)
+
+    cands = []
+    if tp:
+        cands.append(releases.resolve("24.10"))   # 第三方插件只有 opkg 后端有
+    cands.append(r)
+    cands.append(releases.snapshot())
+    # 按 release 去重保序
+    seen, ordered = set(), []
+    for c in cands:
+        if c["release"] not in seen:
+            seen.add(c["release"])
+            ordered.append(c)
+
+    if profile:
+        judged = False
+        for c in ordered:
+            profs = imagebuilder_profiles(c["release"], target)
+            if profs is None:
+                continue                       # 该 release 信息取不到，跳过判断
+            judged = True
+            if profile in profs:
+                if c["release"] != r["release"]:
+                    print(f"[builder] 设备 {profile} 在 {r['release']} 不支持，"
+                          f"改用 {c['release']}（{c['backend']} 后端）构建", flush=True)
+                return c
+        if judged:
             raise RuntimeError(
-                f"目标平台 {target} 在 {fallback['release']}（opkg 后端）中不存在，"
-                f"无法满足第三方插件 {tp_pkgs[:3]} 的需求。\n"
-                f"建议：去掉这些插件后使用 {r['release']}（apk 后端）构建，"
-                f"或选择支持该平台的其他插件组合。"
+                f"设备 {profile} 在官方 ImageBuilder 的 {target} 中不存在"
+                f"（已检查 {', '.join(c['release'] for c in ordered)}）。\n"
+                f"建议：更换设备，或直接下载该设备的官方预编译镜像。"
             )
-        print(f"[builder] 勾选插件需第三方 feed，版本回落 {r['release']} -> {fallback['release']}",
+
+    # 无法据 profile 判断（未提供 profile 或全部未知）时，退回原逻辑：
+    # 勾选了第三方插件而当前是 apk 后端 → 尝试 24.10
+    if tp and r["backend"] == "apk":
+        fb = releases.resolve("24.10")
+        print(f"[builder] 勾选插件需第三方 feed，版本回落 {r['release']} -> {fb['release']}",
               flush=True)
-        return fallback
+        return fb
     return r
 
 
@@ -130,7 +185,7 @@ def imagebuilder_profiles(release, target):
         if hit and now - hit[0] < _IB_PROF_TTL:
             return hit[1]
 
-    for tpl in BUILD["imagebuilder_mirrors"]:
+    for tpl in _ib_url_templates(release):
         url = tpl.replace("{version}", release).replace("{target}", target) + "profiles.json"
         try:
             rq = urllib.request.Request(url, headers={"User-Agent": "kwrt-imagebuilder-check"})
@@ -141,6 +196,15 @@ def imagebuilder_profiles(release, target):
                 with _IB_PROF_LOCK:
                     _IB_PROF_CACHE[key] = (now, profs)
                 return profs
+        except urllib.error.HTTPError as e:
+            # 404 = 该 release/target 明确不存在（如 24.10 没有 qualcommax/ipq60xx）
+            # → 记为空集，让「profile 是否支持」的判定能得出确定结论，
+            #   而不是因「未知」而误放行到下载/编译阶段才失败。
+            if e.code == 404:
+                with _IB_PROF_LOCK:
+                    _IB_PROF_CACHE[key] = (now, set())
+                return set()
+            print(f"[builder] profiles.json HTTP {e.code} {url}", flush=True)
         except Exception as e:                                     # noqa: BLE001
             print(f"[builder] profiles.json 取不到 {url}: {type(e).__name__}", flush=True)
 
@@ -149,8 +213,115 @@ def imagebuilder_profiles(release, target):
     return None
 
 
+#: 某个 release/target 官方仓库里可用的包名缓存：(release, target) → (时间, 集合|None)
+_IB_PKG_CACHE: dict = {}
+_IB_PKG_TTL = 6 * 3600
+_IB_PKG_LOCK = threading.Lock()
+
+
+def _list_apk_names(url):
+    """列出一个 apk 目录下的包名（去掉版本后缀）。失败返回 None。"""
+    try:
+        rq = urllib.request.Request(url, headers={"User-Agent": "kwrt-pkg-check"})
+        with urllib.request.urlopen(rq, timeout=20) as r:
+            html = r.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+    out = set()
+    for m in re.finditer(r'href="([^"]+\.apk)"', html):
+        fn = m.group(1).split("/")[-1]
+        if fn.endswith(".apk"):
+            # 形如 luci-app-openclash-0.46.078-r1.apk / 6in4-29.apk
+            # 去掉末尾的 -r<修订号>，再去掉 -<版本>（以数字开头的最后一段）
+            stem = fn[:-4]
+            stem = re.sub(r"-r[0-9]+$", "", stem)
+            stem = re.sub(r"-[0-9][A-Za-z0-9_.~+]*$", "", stem)
+            if stem:
+                out.add(stem)
+    return out
+
+
+def release_packages(release, target):
+    """某个 release/target 官方仓库里可安装的包名集合（仅 apk 后端实现）。
+
+    取不到时返回 None —— 与 imagebuilder_profiles 同样的「放行」语义：
+    这是提前告知，不是准入控制，镜像站抖动不该拦掉正常构建。
+    """
+    if release not in (SNAPSHOT_RELEASE, "25.12.5", "25.12"):
+        return None                      # opkg 后端另有 prefetch 兜底，此处不处理
+    key = (release, target)
+    now = time.time()
+    with _IB_PKG_LOCK:
+        hit = _IB_PKG_CACHE.get(key)
+        if hit and now - hit[0] < _IB_PKG_TTL:
+            return hit[1]
+
+    if release == SNAPSHOT_RELEASE:
+        base = "https://downloads.openwrt.org/snapshots"
+    else:
+        base = f"https://downloads.openwrt.org/releases/{release}"
+    arch = arch_of(target)
+    names = set()
+    got_any = False
+    # ① target 专属包（内核模块、设备固件等）
+    t = _list_apk_names(f"{base}/targets/{target}/packages/")
+    if t is not None:
+        names |= t
+        got_any = True
+    # ② 架构通用包（base/luci/packages/routing/telephony 等子目录）
+    if arch:
+        idx = None
+        try:
+            rq = urllib.request.Request(f"{base}/packages/{arch}/",
+                                        headers={"User-Agent": "kwrt-pkg-check"})
+            with urllib.request.urlopen(rq, timeout=20) as r:
+                idx = r.read().decode("utf-8", "replace")
+        except Exception:
+            idx = None
+        if idx is not None:
+            subdirs = set(re.findall(r'href="([a-z0-9_-]+)/"', idx))
+            # 常见的包分类目录
+            for sub in ("base", "luci", "packages", "routing", "telephony", "kernel"):
+                if sub in subdirs:
+                    s = _list_apk_names(f"{base}/packages/{arch}/{sub}/")
+                    if s is not None:
+                        names |= s
+                        got_any = True
+
+    result = names if got_any else None
+    with _IB_PKG_LOCK:
+        _IB_PKG_CACHE[key] = (now, result)
+    return result
+
+
+def filter_unavailable(release, target, packages):
+    """从请求的包列表里剔除该 release 官方仓库中不存在的包。
+
+    返回 (可安装列表, 被剔除列表)。取不到包索引时原样返回（放行）。
+    """
+    pkgs = [p for p in (packages or []) if p]
+    avail = release_packages(release, target)
+    if avail is None:
+        return pkgs, []
+    keep, dropped = [], []
+    for p in pkgs:
+        name = p[1:] if p.startswith("-") else p   # 排除项（-pkg）不校验
+        if p.startswith("-") or name in avail:
+            keep.append(p)
+        else:
+            dropped.append(name)
+    return keep, dropped
+
+
 def ib_dir_name(version, target):
-    return f"openwrt-imagebuilder-{version}-{target.replace('/', '-')}.Linux-x86_64"
+    """ImageBuilder 解压目录名。
+    SNAPSHOT 的文件名不含版本号：openwrt-imagebuilder-{target}.Linux-x86_64
+    稳定版含版本号：openwrt-imagebuilder-{version}-{target}.Linux-x86_64
+    """
+    slug = target.replace('/', '-')
+    if version == SNAPSHOT_RELEASE:
+        return f"openwrt-imagebuilder-{slug}.Linux-x86_64"
+    return f"openwrt-imagebuilder-{version}-{slug}.Linux-x86_64"
 
 
 def ensure_imagebuilder(version, target):
@@ -165,13 +336,20 @@ def ensure_imagebuilder(version, target):
         if os.path.isdir(os.path.join(root, "build_dir")) and not os.path.exists(
                 os.path.join(kdir, "generic-kernel.bin")):
             ok = False                      # build_dir 不完整 → 重新解压
+        # SNAPSHOT 是滚动构建，目录会随时间过期；用时间戳判定新鲜度（默认 12 小时）
+        if ok and version == SNAPSHOT_RELEASE:
+            age = time.time() - os.path.getmtime(os.path.join(root, "Makefile"))
+            if age > 12 * 3600:
+                print("[builder] SNAPSHOT 工作目录超 12 小时，重新下载以取最新设备",
+                      flush=True)
+                ok = False
     if ok:
         return root
 
     tarball = os.path.join(CACHE, name + ".tar.zst")
     if not os.path.exists(tarball) or os.path.getsize(tarball) < 1 << 20:
         ok = False
-        for tpl in BUILD["imagebuilder_mirrors"]:
+        for tpl in _ib_url_templates(version):
             url = tpl.replace("{version}", version).replace("{target}", target) + name + ".tar.zst"
             print(f"[builder] fetching ImageBuilder: {url}", flush=True)
             if download(url, tarball):
@@ -338,9 +516,37 @@ ARCH_BY_TARGET = {
     "armsr/armv8": "aarch64_generic",
 }
 
+#: target → 架构 缓存（来自本地数据集 index.json 的 architecture 字段）
+_ARCH_CACHE: dict = {}
+
+
+def _arch_from_dataset(target):
+    """从本地设备数据集的 index.json 读取该 target 的真实架构。
+
+    数据集里每个 target 的 index.json 都有 architecture 字段（如
+    qualcommax/ipq60xx → aarch64_cortex-a53）。ARCH_BY_TARGET 只覆盖了少数
+    常见平台，其余会落到错误的默认值，导致按错误架构抓包索引 → 误判包不可用。
+    """
+    if target in _ARCH_CACHE:
+        return _ARCH_CACHE[target]
+    rel_dir = os.path.join(ROOT, "data", "json", "v1", "releases")
+    arch = ""
+    try:
+        for branch in os.listdir(rel_dir):
+            p = os.path.join(rel_dir, branch, "targets", target, "index.json")
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8") as f:
+                    arch = str(json.load(f).get("architecture") or "").strip()
+                if arch:
+                    break
+    except Exception:
+        arch = ""
+    _ARCH_CACHE[target] = arch
+    return arch
+
 
 def arch_of(target):
-    return ARCH_BY_TARGET.get(target, "x86_64")
+    return _arch_from_dataset(target) or ARCH_BY_TARGET.get(target, "x86_64")
 
 
 def normalize_packages(add_remove, backend):
@@ -496,13 +702,23 @@ def build(req, on_progress, request_hash=None, handle=None):
     target = req["target"]              # 例如 x86/64
     profile = req["profile"]
     packages = req.get("packages") or []
-    # 版本选择：统一走 pick_version（含第三方回落 + target 可用性检查）
+    # 版本选择：统一走 pick_version（含第三方回落 + SNAPSHOT 新设备回落）
     try:
-        rinfo = pick_version(target, req.get("version") or req.get("branch"), packages)
+        rinfo = pick_version(target, req.get("version") or req.get("branch"),
+                             packages, profile=profile)
     except RuntimeError as e:
         return {"status": "failed", "detail": str(e), "stdout": "", "stderr": str(e)}
     version = rinfo["release"]
     branch, backend = rinfo["branch"], rinfo["backend"]
+    # apk 后端（25.12 / SNAPSHOT）无第三方 feed：剔除官方仓库里不存在的包，
+    # 避免 make 因单个包缺失而整轮失败（如开发版设备 + 第三方插件的组合）。
+    dropped_pkgs = []
+    if backend == "apk":
+        packages, dropped_pkgs = filter_unavailable(version, target, packages)
+        req = dict(req)
+        req["packages"] = packages
+        if dropped_pkgs:
+            print(f"[builder] {version} 中不可用、已忽略的包: {dropped_pkgs}", flush=True)
     add, remove = normalize_packages(parse_pkg_list(packages), backend)
     rootfs_mb = req.get("rootfs_size_mb") or 1004
 
@@ -511,7 +727,9 @@ def build(req, on_progress, request_hash=None, handle=None):
 
     on_progress("started", "准备 ImageBuilder")
     ib = ensure_imagebuilder(version, target)
-    ensure_core_ipks(ib)
+    if backend == "opkg":
+        # 仅 opkg 后端需要固化 libc/kernel 的 ipk 并预生成 Packages 索引
+        ensure_core_ipks(ib)
     ensure_repositories(ib, branch, version, arch_of(target), backend)
     apply_filesystem(ib, req.get("filesystem"))
 
@@ -649,7 +867,7 @@ def build(req, on_progress, request_hash=None, handle=None):
     # 安装包清单
     installed = sorted({os.path.splitext(f)[0] for f in _installed_ips(ib, target)})
     on_progress("done", f"构建完成，产出 {len(files)} 个文件，耗时 {dur:.0f}s")
-    return {
+    res = {
         "status": "done",
         "request_hash": request_hash,
         "store_url": f"/store/{request_hash}",
@@ -662,6 +880,11 @@ def build(req, on_progress, request_hash=None, handle=None):
         "version": version,
         "duration": round(dur, 1),
     }
+    if dropped_pkgs:
+        res["dropped_packages"] = dropped_pkgs
+        res["warning"] = (f"{version} 官方源中不存在以下插件，已自动忽略："
+                          + "、".join(dropped_pkgs))
+    return res
 
 
 def _installed_ips(ib, target):

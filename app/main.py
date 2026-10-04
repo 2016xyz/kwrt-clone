@@ -1135,7 +1135,8 @@ async def build_post(request: Request, response: Response):
     # ★ 取不到 profiles.json 时**放行**（imagebuilder_profiles 返回 None）：
     #   这是提前告知，不是准入控制，镜像站抖动不该把正常构建拦掉。
     try:
-        rel = builder.pick_version(req["target"], req["version"], req["packages"])["release"]
+        rel = builder.pick_version(req["target"], req["version"], req["packages"],
+                                   profile=req["profile"])["release"]
         supported = builder.imagebuilder_profiles(rel, req["target"])
         if supported is not None and req["profile"] not in supported:
             return JSONResponse({
@@ -1147,6 +1148,11 @@ async def build_post(request: Request, response: Response):
                 "error_code": "PROFILE_UNSUPPORTED",
                 "supported_profiles": sorted(supported),
             }, status_code=400)
+    except RuntimeError as e:
+        # pick_version 明确判定无法构建（如设备稳定版与 SNAPSHOT 均不支持）
+        return JSONResponse({
+            "detail": str(e), "stderr": str(e), "error_code": "PROFILE_UNSUPPORTED",
+        }, status_code=400)
     except Exception as e:                                        # noqa: BLE001
         print(f"[builder] profile 预检异常，放行本次构建: {type(e).__name__}: {e}", flush=True)
 
@@ -1247,7 +1253,8 @@ def build_status(hash_: str):
     for k in ("files", "packages", "stdout", "stderr", "detail", "store_url",
               "queue_position", "duration", "target", "profile", "version",
               "imagebuilder_status", "download_links", "link_ttl_hours",
-              "links_expire_at", "mail_status", "external", "gh_run_url", "mirror"):
+              "links_expire_at", "mail_status", "external", "gh_run_url", "mirror",
+              "warning", "dropped_packages"):
         if j.get(k) is not None:
             out[k] = j[k]
     # 未签发过链接的历史任务：按需补签（保证产物始终有可用链接）
@@ -1900,6 +1907,10 @@ def api_site(request: Request):
     d["verify_register"] = bool(SS.get("mail.verify_register"))
     d["versions"] = [{"branch": b, "release": releases.resolve(b)["release"],
                       "backend": releases.resolve(b)["backend"]} for b in ("25.12", "24.10")]
+    # 开发版（SNAPSHOT）：收录稳定版尚未发布的新设备（如 JDCloud ipq60xx）。
+    # 用户选择它时按 SNAPSHOT 构建；未显式选择但设备仅存在于开发版时，构建会自动回落。
+    d["versions"].append({"branch": "snapshot", "release": releases.SNAPSHOT["release"],
+                          "backend": releases.SNAPSHOT["backend"], "prerelease": True})
     # 当前对外基址：绑域名 / 接 CDN 后，验证邮件链接、下载链接、支付回调都基于它。
     # 放出来便于运维核对（不含任何敏感值）。
     d["base_url"] = netcfg.base_url(request)
