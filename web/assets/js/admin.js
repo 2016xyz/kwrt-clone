@@ -161,6 +161,9 @@
       const orig = reactive({});
       const tiersEdit = ref([]);
       let origTiers = '';
+      // 广告位可视化编辑（与卖套餐同一套「可视化 + 并入保存」流程）
+      const adsEdit = ref([]);
+      let origAds = '';
 
       /* ---------------- 通用 ---------------- */
       function toast(m, t) { K.toast(m, t || 'info'); }
@@ -427,17 +430,20 @@
           });
           tiersEdit.value = JSON.parse(JSON.stringify(vals['sponsor.tiers'] || []));
           origTiers = JSON.stringify(tiersEdit.value);
+          adsEdit.value = JSON.parse(JSON.stringify(vals['ads'] || []));
+          origAds = JSON.stringify(adsEdit.value);
         });
       }
       function fieldsOf(g) {
-        // 套餐用可视化编辑器，不再重复渲染原始 JSON 文本框
+        // 套餐、广告用可视化编辑器，不再重复渲染原始 JSON 文本框
         return schema.value.filter(function (f) {
-          return f.g === g && f.k !== 'sponsor.tiers';
+          return f.g === g && f.k !== 'sponsor.tiers' && f.k !== 'ads';
         });
       }
       function groupDirty(g) {
         return fieldsOf(g).filter(function (f) { return isDirty(f.k); }).length
-          + (g === 'sponsor' && JSON.stringify(tiersEdit.value) !== origTiers ? 1 : 0);
+          + (g === 'sponsor' && JSON.stringify(tiersEdit.value) !== origTiers ? 1 : 0)
+          + (g === 'ads' && JSON.stringify(adsEdit.value) !== origAds ? 1 : 0);
       }
       function isDirty(k) {
         const f = schema.value.find(function (x) { return x.k === k; });
@@ -456,10 +462,11 @@
       const dirtyCount = computed(function () {
         let n = 0;
         schema.value.forEach(function (f) {
-          if (f.k === 'sponsor.tiers') return;      // 该字段由可视化编辑器管理
+          if (f.k === 'sponsor.tiers' || f.k === 'ads') return;   // 由可视化编辑器管理
           if (isDirty(f.k)) n++;
         });
         if (JSON.stringify(tiersEdit.value) !== origTiers) n++;
+        if (JSON.stringify(adsEdit.value) !== origAds) n++;
         return n;
       });
       function resetCfg() {
@@ -469,6 +476,7 @@
           if (f && f.t === 'json') cfgText[k] = JSON.stringify(orig[k], null, 2);
         });
         tiersEdit.value = JSON.parse(origTiers || '[]');
+        adsEdit.value = JSON.parse(origAds || '[]');
         toast('已放弃未保存的改动', 'info');
       }
       async function saveAllCfg() {
@@ -480,6 +488,9 @@
         });
         if (JSON.stringify(tiersEdit.value) !== origTiers) {
           payload['sponsor.tiers'] = JSON.parse(JSON.stringify(tiersEdit.value));
+        }
+        if (JSON.stringify(adsEdit.value) !== origAds) {
+          payload['ads'] = JSON.parse(JSON.stringify(adsEdit.value));
         }
         if (!Object.keys(payload).length) { toast('没有需要保存的改动', 'info'); return; }
         saving.value = true;
@@ -507,6 +518,36 @@
         tiersEdit.value[i].perks = text.split('\n').map(function (x) { return x.trim(); })
           .filter(Boolean);
       }
+
+      /* ---------------- 广告位可视化编辑 ---------------- */
+      function addAd(mode) {
+        adsEdit.value.push({
+          id: '', enabled: true, mode: mode === 'marquee' ? 'marquee' : 'popup',
+          title: mode === 'marquee' ? '公告' : '站点公告',
+          content: '这里是**广告内容**，支持 Markdown 与 [超链接](https://example.com)。',
+          image: '', link: '', link_text: '查看详情', closable: true,
+          delay: 0, frequency: 'session', speed: 60, position: 'top',
+          bg: '#2563eb', color: '#ffffff', start: '', end: '',
+        });
+      }
+      function removeAd(i) {
+        const a = adsEdit.value[i] || {};
+        if (!confirm('删除该「' + (a.mode === 'marquee' ? '滚动' : '弹出') +
+                     '」广告？' + (a.title ? '（' + a.title + '）' : ''))) return;
+        adsEdit.value.splice(i, 1);
+      }
+      function moveAd(i, d) {
+        const j = i + d;
+        if (j < 0 || j >= adsEdit.value.length) return;
+        const arr = adsEdit.value;
+        const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+      }
+      // 管理端预览：复用前台的 Markdown 渲染器（同样先转义再白名单替换）
+      function adPreview(a) {
+        if (!K || typeof K.mdToHtml !== 'function') return '';
+        return K.mdToHtml(a && a.content);
+      }
+      function adKindLabel(m) { return m === 'marquee' ? '滚动' : '弹出'; }
 
       /* ---------------- 邮件 ---------------- */
       async function loadMailLog() {
@@ -863,6 +904,7 @@
         loadCatalog, addPreset, removePreset, addCat, removeCat, addSuite,
         removeSuite, resetCatalog, catName, catalogFiltered,
         schema, groups, cfg, cfgText, tiersEdit, dirtyCount,
+        adsEdit, addAd, removeAd, moveAd, adPreview, adKindLabel,
         fieldsOf, groupDirty, resetCfg, saveAllCfg, addTier, removeTier, setPerks,
         loadOverview, loadUsers, openCreateUser, editUser, saveUser, delUser,
         sponsorUser, sponsorAct, adminReverify, adminSetVerified,

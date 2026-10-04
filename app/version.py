@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 
 #: 当前版本。与仓库根 VERSION 文件保持同步（tests 会校验两者一致）。
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 #: 展示用（后台/页脚/API 统一用这个格式）
 def display() -> str:

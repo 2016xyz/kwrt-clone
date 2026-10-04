@@ -92,6 +92,17 @@
 
   <main id="main">
 
+    <!-- ================= 广告：滚动（顶部）================= -->
+    <div class="ad-marquee" v-for="ad in marqueeTop" :key="'mt-' + ad.id" :style="marqueeStyle(ad)">
+      <span class="ad-marquee-tag" v-if="ad.title">{{ ad.title }}</span>
+      <div class="ad-marquee-view">
+        <div class="ad-marquee-track" :data-ad-id="ad.id"
+             :style="{ animationDuration: (marqueeDur[ad.id] || 18) + 's' }">
+          <span class="ad-md" v-html="adHtml(ad)"></span><span class="ad-md" v-html="adHtml(ad)"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- ================= 公告 ================= -->
     <div class="container" style="padding-top:var(--sp-5)" v-if="site.announcement">
       <div class="alert alert-info">
@@ -792,7 +803,34 @@
         <p class="fs-xs text-faint mt-3" v-if="!refundEnabled">本站未开启退款通道。</p>
       </div>
     </section>
+
+    <!-- ================= 广告：滚动（底部）================= -->
+    <div class="ad-marquee is-bottom" v-for="ad in marqueeBottom" :key="'mb-' + ad.id" :style="marqueeStyle(ad)">
+      <span class="ad-marquee-tag" v-if="ad.title">{{ ad.title }}</span>
+      <div class="ad-marquee-view">
+        <div class="ad-marquee-track" :data-ad-id="ad.id"
+             :style="{ animationDuration: (marqueeDur[ad.id] || 18) + 's' }">
+          <span class="ad-md" v-html="adHtml(ad)"></span><span class="ad-md" v-html="adHtml(ad)"></span>
+        </div>
+      </div>
+    </div>
   </main>
+
+  <!-- ================= 广告：弹出 ================= -->
+  <div class="ad-popup-mask" v-if="popupAd" @click.self="closeAd">
+    <div class="ad-popup" role="dialog" aria-modal="true" :aria-label="popupAd.title || '站点公告'">
+      <button class="ad-popup-close" v-if="popupAd.closable" @click="closeAd" aria-label="关闭">×</button>
+      <img class="ad-popup-img" v-if="popupAd.image" :src="popupAd.image" :alt="popupAd.title || ''">
+      <h3 class="ad-popup-title" v-if="popupAd.title">{{ popupAd.title }}</h3>
+      <div class="ad-md" v-html="adHtml(popupAd)"></div>
+      <div class="ad-popup-act">
+        <a class="btn btn-primary btn-sm" v-if="popupAd.link"
+           :href="popupAd.link" target="_blank" rel="noopener noreferrer nofollow"
+           @click="closeAd">{{ popupAd.link_text || '查看详情' }}</a>
+        <button class="btn btn-ghost btn-sm" v-if="popupAd.closable" @click="closeAd">关闭</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ================= 赞助弹窗 ================= -->
   <div class="modal-mask" v-if="openSponsor" @click.self="closeSponsor">
@@ -969,6 +1007,7 @@
 <script src="/vendor/vue.global.prod.js"></script>
 <script src="/vendor/jquery.min.js"></script>
 <script src="/assets/js/common.js"></script>
+<script src="/assets/js/ads.js"></script>
 <script src="/assets/js/presets.js"></script>
 <script src="/assets/js/app.js"></script>
 </body>

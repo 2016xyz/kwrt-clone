@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   if (!window.Vue) return;
-  const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted } = Vue;
+  const { createApp, ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
 
   const LS_KEY = 'xsp_form_v1';
 
@@ -244,6 +244,69 @@
         return pool.filter(function (p) { return p.toLowerCase().indexOf(q) >= 0; }).slice(0, 40);
       });
 
+      /* ---------------- 广告（后台可配置：弹出 / 滚动） ----------------
+       * 数据来自 /api/v1/site 的 ads 字段（后台「广告位」设置）。
+       *   marquee —— 顶部/底部跑马灯，正文支持 Markdown 与超链接；
+       *   popup   —— 模态弹窗，按 delay 延迟弹出，frequency 决定是否重复展示。
+       * 正文一律经 K.mdToHtml 转义 + 白名单渲染，杜绝 XSS。 */
+      const ads = ref([]);
+      const popupAd = ref(null);
+      const marqueeDur = reactive({});
+      let adQueue = [];
+      let adTimer = null;
+
+      const marqueeTop = computed(function () {
+        return ads.value.filter(function (a) { return a.mode === 'marquee' && a.position === 'top'; });
+      });
+      const marqueeBottom = computed(function () {
+        return ads.value.filter(function (a) { return a.mode === 'marquee' && a.position === 'bottom'; });
+      });
+      function adHtml(ad) { return K.mdToHtml(ad && ad.content); }
+      function marqueeStyle(ad) {
+        return { background: ad.bg || 'var(--primary)', color: ad.color || '#ffffff' };
+      }
+      // 跑马灯速度以 px/秒 表达：测量一份文案宽度后换算成动画时长。
+      function measureMarquees() {
+        nextTick(function () {
+          const nodes = document.querySelectorAll('.ad-marquee-track');
+          Array.prototype.forEach.call(nodes, function (el) {
+            const id = el.getAttribute('data-ad-id');
+            const one = el.firstElementChild
+              ? el.firstElementChild.getBoundingClientRect().width
+              : el.getBoundingClientRect().width / 2;
+            const ad = ads.value.find(function (x) { return x.id === id; });
+            const speed = (ad && ad.speed) || 60;
+            marqueeDur[id] = Math.max(6, Math.round(Math.max(one, 1) / speed * 10) / 10);
+          });
+        });
+      }
+      function scheduleNextAd(ms) {
+        if (adTimer) { clearTimeout(adTimer); adTimer = null; }
+        if (!adQueue.length || popupAd.value) return;
+        adTimer = setTimeout(function () {
+          adTimer = null;
+          if (popupAd.value || !adQueue.length) return;
+          popupAd.value = adQueue.shift();
+        }, Math.max(0, ms || 0));
+      }
+      function closeAd() {
+        if (popupAd.value) K.adsMarkSeen(popupAd.value);
+        popupAd.value = null;
+        if (adQueue.length) scheduleNextAd(Math.max(900, (adQueue[0].delay || 0) * 1000));
+      }
+      function setupAds(list) {
+        ads.value = K.adsFilter(list);
+        adQueue = ads.value.filter(function (a) {
+          return a.mode === 'popup' && !K.adsAlreadySeen(a);
+        });
+        measureMarquees();
+        if (adQueue.length) scheduleNextAd((adQueue[0].delay || 0) * 1000);
+      }
+      function onAdResize() { measureMarquees(); }
+      function onAdKeydown(e) {
+        if (e.key === 'Escape' && popupAd.value && popupAd.value.closable) closeAd();
+      }
+
       /* ---------------- 数据加载 ---------------- */
       async function loadSite() {
         site.value = await K.api('/api/v1/site');
@@ -253,6 +316,7 @@
         if (site.value.site_name) document.title = site.value.site_name;
         const l = site.value.logo_url;
         if (l) { const f = document.querySelector('link[rel="icon"]'); if (f) f.href = l; }
+        setupAds(site.value.ads || []);
       }
       async function loadUser() {
         try { user.value = await K.api('/api/v1/user'); }
@@ -730,6 +794,8 @@
       watch(openSponsor, function (v) { if (!v) { stopPayPoll(); payOrder.value = null; } });
 
       onMounted(async function () {
+        window.addEventListener('resize', onAdResize);
+        window.addEventListener('keydown', onAdKeydown);
         // 无论初始化是否出错，遮罩都必须消失 —— 否则整页被永久盖住
         try {
           restoreForm();
@@ -749,7 +815,13 @@
           booting.value = false;
         }
       });
-      onUnmounted(function () { if (pollTimer) clearTimeout(pollTimer); if (tickTimer) clearInterval(tickTimer); });
+      onUnmounted(function () {
+        if (pollTimer) clearTimeout(pollTimer);
+        if (tickTimer) clearInterval(tickTimer);
+        if (adTimer) clearTimeout(adTimer);
+        window.removeEventListener('resize', onAdResize);
+        window.removeEventListener('keydown', onAdKeydown);
+      });
 
       return {
         site, user, devices, booting, menu, query, openList, hl, device, images, branch,
@@ -763,6 +835,8 @@
         // 预设插件包
         presetCats, suites, collapsed, presetsByCat, isPicked, toggleSuite, suiteOn,
         extraPkgs, removeExtra,
+        // 广告位（弹出 / 滚动）
+        marqueeTop, marqueeBottom, marqueeDur, popupAd, adHtml, marqueeStyle, closeAd,
         // 配额展示
         quota: computed(function () { return site.value.default_quota || 12; }),
         move, pickHighlighted, pickDevice, clearDevice, hasPkg, togglePkg, removePkg, addPkg,

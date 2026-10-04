@@ -23,6 +23,7 @@ DB = os.path.join(ROOT, "users.db")
 GROUPS = [
     ("brand",    "品牌与外观", "站点名称、Logo、主题色"),
     ("home",     "首页文案",   "主标题、副标题、提示语"),
+    ("ads",      "广告位",     "前台弹出 / 滚动广告，支持 Markdown 与超链接"),
     ("links",    "页脚与联系", "页脚补充文案、软件库入口、联系方式"),
     ("build",    "构建设置",   "构建后端、并发、默认版本、配额"),
     ("download", "下载与链接", "有效期、访问控制、外链策略"),
@@ -74,6 +75,30 @@ SCHEMA = [
          d="本站为 openwrt.ai 功能复刻演示站，固件由 OpenWrt 官方 ImageBuilder 实时编译。",
          label="页脚文案", max=400),
     dict(k="show_help", g="home", t="bool", d=True, label="显示帮助入口"),
+
+    # ---------------- 广告位 ----------------
+    # 前台广告：mode=popup 弹出模态框 / mode=marquee 滚动跑马灯。
+    # 正文按 Markdown 渲染（支持 **加粗**、[链接](https://x)、列表、图片等），
+    # 渲染端先整体 HTML 转义再白名单替换，链接仅放行 http(s)/mailto/tel 与站内路径。
+    # 由后台「广告可视化编辑」维护；前台按 enabled 与 start/end 时间窗过滤后展示。
+    dict(k="ads", g="ads", t="json", d=[], label="广告列表",
+         hint='JSON 数组，每项一个广告，通常由下方可视化编辑器维护。字段说明：\n'
+              '  enabled    是否启用（false 则不展示）\n'
+              '  mode       popup=弹出模态框；marquee=滚动跑马灯\n'
+              '  title      标题（弹出框显示为标题，滚动条显示为前置标签）\n'
+              '  content    正文，支持 Markdown 与超链接\n'
+              '  image      可选配图地址（弹出框顶部大图）\n'
+              '  link       可选跳转地址；link_text 为按钮文字\n'
+              '  closable   是否允许用户关闭（false 则强制展示）\n'
+              '  delay      弹出延迟秒数（0=立即）\n'
+              '  frequency  session=每个会话一次；always=每次访问；once=仅一次\n'
+              '  speed      滚动速度（px/秒，10–400）\n'
+              '  position   top/bottom，滚动条位置\n'
+              '  bg / color 滚动条背景色与文字色\n'
+              '  start/end  可选起止时间，如 2026-01-01（只写日期时 end 含当天）\n'
+              '示例：[{"enabled":true,"mode":"popup","title":"公告",'
+              '"content":"新版上线，**欢迎体验** → [详情](https://example.com)",'
+              '"delay":1,"frequency":"session"}]'),
 
     # ---------------- 页脚与联系 ----------------
     dict(k="footer_moat_title", g="links", t="text", d="",
@@ -479,6 +504,11 @@ def validate(key, value):
             ok, err = _validate_tiers(v)
             if not ok:
                 return False, None, err
+        if key == "ads":
+            ok, err = _validate_ads(v)
+            if not ok:
+                return False, None, err
+            v = _normalize_ads(v)
         return True, v, ""
     if t == "email":
         v = str(value).strip()
@@ -533,6 +563,97 @@ def _validate_tiers(v):
     return True, ""
 
 
+def _as_bool(x, dflt=True):
+    """把 JSON 里五花八门的真假值统一成 bool。"""
+    if x is None:
+        return dflt
+    if isinstance(x, bool):
+        return x
+    return str(x).strip().lower() not in ("false", "0", "no", "off", "")
+
+
+def _clamp_int(x, dflt, lo, hi):
+    try:
+        n = int(float(x))
+    except (TypeError, ValueError, OverflowError):
+        n = dflt
+    return max(lo, min(hi, n))
+
+
+_ADS_MODES = ("popup", "marquee")
+_ADS_FREQ = ("session", "always", "once")
+_ADS_POS = ("top", "bottom")
+_ADS_TEXT_MAX = {"title": 200, "content": 4000, "image": 500, "link": 500,
+                 "link_text": 60, "bg": 32, "color": 32, "start": 32, "end": 32}
+
+
+def _validate_ads(v):
+    """校验广告列表。逐条检查类型与取值范围，返回 (ok, 错误信息)。"""
+    if not isinstance(v, list):
+        return False, "广告列表必须是 JSON 数组"
+    if len(v) > 20:
+        return False, "广告最多 20 条"
+    for i, it in enumerate(v):
+        tag = f"第 {i + 1} 条广告"
+        if not isinstance(it, dict):
+            return False, f"{tag}不是对象"
+        mode = str(it.get("mode", "popup")).strip().lower()
+        if mode not in _ADS_MODES:
+            return False, f"{tag}的 mode 只能是 popup(弹出) 或 marquee(滚动)"
+        freq = str(it.get("frequency", "session")).strip().lower()
+        if freq not in _ADS_FREQ:
+            return False, f"{tag}的 frequency 只能是 session/always/once"
+        pos = str(it.get("position", "top")).strip().lower()
+        if pos not in _ADS_POS:
+            return False, f"{tag}的 position 只能是 top/bottom"
+        for fld, mx in _ADS_TEXT_MAX.items():
+            if len(str(it.get(fld, "") or "")) > mx:
+                return False, f"{tag}的 {fld} 长度不能超过 {mx}"
+        dly = _clamp_int(it.get("delay", 0), 0, 0, 120)
+        if dly != _clamp_int(it.get("delay", 0), -1, -1, 999):
+            return False, f"{tag}的 delay 需在 0–120 秒之间"
+        spd = _clamp_int(it.get("speed", 60), 60, 10, 400)
+        if spd != _clamp_int(it.get("speed", 60), -1, -1, 9999):
+            return False, f"{tag}的 speed 需在 10–400 之间"
+        # 起止时间若填写，必须是可解析的日期/时间串
+        for fld in ("start", "end"):
+            s = str(it.get(fld, "") or "").strip()
+            if s and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?", s):
+                return False, f"{tag}的 {fld} 需形如 2026-01-01 或 2026-01-01 08:30"
+    return True, ""
+
+
+def _normalize_ads(v):
+    """归一化：补齐 id、裁剪字段、统一类型与默认值。只保留已知字段。"""
+    out = []
+    for it in v:
+        a = {
+            "id": str(it.get("id", "")).strip()[:32] or os.urandom(6).hex(),
+            "enabled": _as_bool(it.get("enabled", True)),
+            "mode": ("marquee" if str(it.get("mode", "popup")).strip().lower() == "marquee"
+                     else "popup"),
+            "title": str(it.get("title", "") or ""),
+            "content": str(it.get("content", "") or ""),
+            "image": str(it.get("image", "") or ""),
+            "link": str(it.get("link", "") or ""),
+            "link_text": str(it.get("link_text", "") or ""),
+            "closable": _as_bool(it.get("closable", True)),
+            "delay": _clamp_int(it.get("delay", 0), 0, 0, 120),
+            "frequency": (str(it.get("frequency", "session")).strip().lower()
+                          if str(it.get("frequency", "session")).strip().lower() in _ADS_FREQ
+                          else "session"),
+            "speed": _clamp_int(it.get("speed", 60), 60, 10, 400),
+            "position": ("bottom" if str(it.get("position", "top")).strip().lower() == "bottom"
+                         else "top"),
+            "bg": str(it.get("bg", "") or ""),
+            "color": str(it.get("color", "") or ""),
+            "start": str(it.get("start", "") or ""),
+            "end": str(it.get("end", "") or ""),
+        }
+        out.append(a)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # 读写
 # --------------------------------------------------------------------------- #
@@ -575,6 +696,8 @@ def public_values():
     keys = ["site_name", "site_short", "site_desc", "logo_url", "favicon_url",
             "primary_color", "theme_default", "hero_title", "hero_subtitle",
             "devices_hint", "customize_title", "announcement", "footer_text", "show_help",
+            # 广告位：前台据此渲染弹出/滚动广告（内容由管理员配置，非敏感）
+            "ads",
             "footer_moat_title", "footer_moat_text",
             "packages_url", "contact_email", "contact_text", "icp_text",
             "build_default_version", "build_vip_hint", "build_allow_anonymous",

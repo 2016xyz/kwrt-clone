@@ -567,6 +567,151 @@
                   </div>
                   <p class="field-hint mt-3">套餐改动会并入上方「赞助设置」的保存动作。</p>
                 </div>
+
+                <!-- 广告位可视化编辑器 -->
+                <div v-if="g.k === 'ads'" class="mt-5">
+                  <div class="row-between mb-3">
+                    <b class="fs-sm">广告可视化编辑</b>
+                    <div style="display:flex;gap:var(--sp-2)">
+                      <button class="btn btn-xs btn-outline" @click="addAd('popup')">＋ 弹出广告</button>
+                      <button class="btn btn-xs btn-outline" @click="addAd('marquee')">＋ 滚动广告</button>
+                    </div>
+                  </div>
+
+                  <p class="field-hint mb-3" v-if="!adsEdit.length">
+                    暂无广告。点击上方按钮新增。正文支持 Markdown：<code>**加粗**</code>、
+                    <code>*斜体*</code>、<code>`代码`</code>、<code>[链接](https://example.com)</code>、
+                    <code>- 列表</code>、<code>![图片](url)</code>。链接仅放行 http(s)/mailto/tel 与站内路径。
+                  </p>
+
+                  <div class="stack" v-for="(a, i) in adsEdit" :key="'ad-' + i">
+                    <div class="card card-pad-sm">
+                      <div class="row-between mb-3">
+                        <span class="badge" :class="a.mode === 'marquee' ? 'badge-info' : 'badge-warning'">
+                          #{{ i + 1 }} · {{ adKindLabel(a.mode) }}</span>
+                        <div style="display:flex;align-items:center;gap:var(--sp-2)">
+                          <label class="switch">
+                            <input type="checkbox" v-model="a.enabled">
+                            <span class="switch-track"></span>
+                            <span class="fs-xs">{{ a.enabled ? '启用' : '停用' }}</span>
+                          </label>
+                          <button class="btn btn-xs btn-outline" :disabled="i === 0"
+                                  @click="moveAd(i, -1)" title="上移">↑</button>
+                          <button class="btn btn-xs btn-outline" :disabled="i === adsEdit.length - 1"
+                                  @click="moveAd(i, 1)" title="下移">↓</button>
+                          <button class="btn btn-xs btn-danger-soft" @click="removeAd(i)">删除</button>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-2" style="gap:var(--sp-3)">
+                        <div class="field">
+                          <label class="field-label">展示方式</label>
+                          <select class="select" v-model="a.mode">
+                            <option value="popup">弹出（模态框）</option>
+                            <option value="marquee">滚动（跑马灯）</option>
+                          </select>
+                        </div>
+                        <div class="field">
+                          <label class="field-label">标题</label>
+                          <input class="input" v-model="a.title"
+                                 :placeholder="a.mode === 'marquee' ? '滚动条前置标签' : '弹出框标题'">
+                        </div>
+                      </div>
+
+                      <div class="field mt-3">
+                        <label class="field-label">正文（Markdown）</label>
+                        <textarea class="textarea mono" rows="5" v-model="a.content"
+                                  placeholder="支持 **加粗**、[链接](https://example.com)、- 列表、![图片](url)"></textarea>
+                      </div>
+
+                      <div class="grid grid-2 mt-3" style="gap:var(--sp-3)">
+                        <div class="field">
+                          <label class="field-label">配图地址（可选）</label>
+                          <input class="input" v-model="a.image" placeholder="/static/ad.png 或 https://…">
+                        </div>
+                        <div class="field">
+                          <label class="field-label">跳转链接（可选）</label>
+                          <input class="input" v-model="a.link" placeholder="https://example.com">
+                        </div>
+                      </div>
+
+                      <div class="grid grid-2 mt-3" style="gap:var(--sp-3)">
+                        <div class="field">
+                          <label class="field-label">按钮文字</label>
+                          <input class="input" v-model="a.link_text" placeholder="查看详情">
+                        </div>
+                        <div class="field" v-if="a.mode === 'popup'">
+                          <label class="field-label">弹出频率</label>
+                          <select class="select" v-model="a.frequency">
+                            <option value="session">每个会话一次</option>
+                            <option value="always">每次访问都弹</option>
+                            <option value="once">仅弹一次（永久记住）</option>
+                          </select>
+                        </div>
+                        <div class="field" v-else>
+                          <label class="field-label">滚动位置</label>
+                          <select class="select" v-model="a.position">
+                            <option value="top">顶部</option>
+                            <option value="bottom">底部</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-2 mt-3" style="gap:var(--sp-3)" v-if="a.mode === 'popup'">
+                        <div class="field">
+                          <label class="field-label">弹出延迟（秒）</label>
+                          <input class="input" type="number" min="0" max="120" v-model.number="a.delay">
+                        </div>
+                        <div class="field">
+                          <label class="field-label">用户可否关闭</label>
+                          <label class="switch">
+                            <input type="checkbox" v-model="a.closable">
+                            <span class="switch-track"></span>
+                            <span class="fs-sm">{{ a.closable ? '可关闭' : '强制展示' }}</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-2 mt-3" style="gap:var(--sp-3)" v-else>
+                        <div class="field">
+                          <label class="field-label">滚动速度（px/秒）</label>
+                          <input class="input" type="number" min="10" max="400" v-model.number="a.speed">
+                        </div>
+                        <div class="field">
+                          <label class="field-label">背景色 / 文字色</label>
+                          <div style="display:flex;gap:var(--sp-2)">
+                            <input class="input" type="color" style="width:52px;padding:2px"
+                                   :value="a.bg || '#2563eb'" @input="a.bg = $event.target.value">
+                            <input class="input" type="color" style="width:52px;padding:2px"
+                                   :value="a.color || '#ffffff'" @input="a.color = $event.target.value">
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="grid grid-2 mt-3" style="gap:var(--sp-3)">
+                        <div class="field">
+                          <label class="field-label">开始时间（可选）</label>
+                          <input class="input" v-model="a.start" placeholder="2026-01-01">
+                        </div>
+                        <div class="field">
+                          <label class="field-label">结束时间（可选）</label>
+                          <input class="input" v-model="a.end" placeholder="2026-12-31">
+                        </div>
+                      </div>
+
+                      <div class="field mt-3">
+                        <label class="field-label">正文预览</label>
+                        <div class="ad-md card card-pad-sm" style="background:var(--bg-sunken)"
+                             v-html="adPreview(a)"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p class="field-hint mt-3">
+                    广告改动会并入右上角「保存全部改动」。仅「启用」且处于起止时间窗内的广告才会在前台展示；
+                    弹出广告按此处顺序依次弹出，滚动广告按顺序叠加显示。
+                  </p>
+                </div>
               </div>
             </details>
           </div>
@@ -1413,6 +1558,7 @@
 <script src="/vendor/vue.global.prod.js"></script>
 <script src="/vendor/jquery.min.js"></script>
 <script src="/assets/js/common.js"></script>
+<script src="/assets/js/ads.js"></script>
 <script src="/assets/js/admin.js"></script>
 </body>
 </html>
