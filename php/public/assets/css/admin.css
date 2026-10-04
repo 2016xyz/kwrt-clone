@@ -27,3 +27,19 @@
   .admin-nav-item{border-left:0;border-bottom:3px solid transparent;white-space:nowrap}
   .admin-nav-item.active{border-left:0;border-bottom-color:var(--accent)}
 }
+
+/* ---- 广告位可视化编辑器 ---- */
+.ads-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.ads-card{border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:12px;
+  background:var(--card)}
+.ads-card-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ads-head .muted{flex:1 1 260px}
+.ads-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ads-grid .fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ads-grid .fld>label{font-size:13px;font-weight:500}
+.ads-grid .fld:nth-child(3){grid-column:1/-1}   /* 正文占整行 */
+.ads-preview{margin-top:12px;padding:10px 12px;border-radius:var(--r-sm);
+  background:rgba(127,127,127,.08);border:1px solid var(--line)}
+.btn-danger{border-color:var(--err)!important;color:var(--err)!important}
+.btn-danger:hover{background:color-mix(in srgb,var(--err) 12%,transparent)}
+@media (max-width:640px){.ads-grid{grid-template-columns:1fr}}

@@ -202,6 +202,126 @@ final class Settings
 
     // ------------------------------------------------------------- 校验
 
+    /* ------------------------------------------------------------------ *
+     * 广告位（key=ads）
+     * 取值约束与 app/sitesettings.py 的 _ADS_* 常量保持一致 —— 两版共用
+     * 同一份设置，校验口径不一致会出现「Python 能存、PHP 存不进」的怪象。
+     * ------------------------------------------------------------------ */
+    private const ADS_MODES = ['popup', 'marquee'];
+    private const ADS_FREQ  = ['session', 'always', 'once'];
+    private const ADS_POS   = ['top', 'bottom'];
+    private const ADS_TEXT_MAX = ['title' => 200, 'content' => 4000, 'image' => 500,
+                                  'link' => 500, 'link_text' => 60, 'bg' => 32,
+                                  'color' => 32, 'start' => 32, 'end' => 32];
+
+    private static function asBool(mixed $x, bool $dflt = true): bool
+    {
+        if ($x === null) {
+            return $dflt;
+        }
+        if (is_bool($x)) {
+            return $x;
+        }
+        return !in_array(strtolower(trim((string) $x)), ['false', '0', 'no', 'off', ''], true);
+    }
+
+    private static function clampInt(mixed $x, int $dflt, int $lo, int $hi): int
+    {
+        $n = is_numeric($x) ? (int) (float) $x : $dflt;
+        return max($lo, min($hi, $n));
+    }
+
+    /** 校验广告列表。返回 '' 表示通过，否则为错误文案。 */
+    private static function validateAds(mixed $v): string
+    {
+        if (!is_array($v) || !array_is_list($v)) {
+            return '广告列表必须是 JSON 数组';
+        }
+        if (count($v) > 20) {
+            return '广告最多 20 条';
+        }
+        $i = 0;
+        foreach ($v as $it) {
+            $i++;
+            $tag = "第 {$i} 条广告";
+            if (!is_array($it)) {
+                return "{$tag}不是对象";
+            }
+            if (!in_array(strtolower(trim((string) ($it['mode'] ?? 'popup'))), self::ADS_MODES, true)) {
+                return "{$tag}的 mode 只能是 popup(弹出) 或 marquee(滚动)";
+            }
+            if (!in_array(strtolower(trim((string) ($it['frequency'] ?? 'session'))), self::ADS_FREQ, true)) {
+                return "{$tag}的 frequency 只能是 session/always/once";
+            }
+            if (!in_array(strtolower(trim((string) ($it['position'] ?? 'top'))), self::ADS_POS, true)) {
+                return "{$tag}的 position 只能是 top/bottom";
+            }
+            foreach (self::ADS_TEXT_MAX as $fld => $mx) {
+                if (mb_strlen((string) ($it[$fld] ?? '')) > $mx) {
+                    return "{$tag}的 {$fld} 长度不能超过 {$mx}";
+                }
+            }
+            $dly = $it['delay'] ?? 0;
+            if ($dly !== null && $dly !== '' && !is_numeric($dly)) {
+                return "{$tag}的 delay 需在 0–120 秒之间";
+            }
+            if (is_numeric($dly) && (float) $dly != self::clampInt($dly, 0, 0, 120)) {
+                return "{$tag}的 delay 需在 0–120 秒之间";
+            }
+            $spd = $it['speed'] ?? 60;
+            if ($spd !== null && $spd !== '' && !is_numeric($spd)) {
+                return "{$tag}的 speed 需在 10–400 之间";
+            }
+            if (is_numeric($spd) && (float) $spd != self::clampInt($spd, 60, 10, 400)) {
+                return "{$tag}的 speed 需在 10–400 之间";
+            }
+            foreach (['start', 'end'] as $fld) {
+                $s = trim((string) ($it[$fld] ?? ''));
+                if ($s !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/', $s)) {
+                    return "{$tag}的 {$fld} 需形如 2026-01-01 或 2026-01-01 08:30";
+                }
+            }
+        }
+        return '';
+    }
+
+    /** 归一化：补齐 id、裁剪字段、统一类型与默认值。只保留已知字段。 */
+    private static function normalizeAds(mixed $v): array
+    {
+        $out = [];
+        foreach ((array) $v as $it) {
+            $it = (array) $it;
+            $id = trim((string) ($it['id'] ?? ''));
+            if ($id === '') {
+                $id = bin2hex(random_bytes(6));
+            }
+            $freq = strtolower(trim((string) ($it['frequency'] ?? 'session')));
+            if (!in_array($freq, self::ADS_FREQ, true)) {
+                $freq = 'session';
+            }
+            $out[] = [
+                'id' => mb_substr($id, 0, 32),
+                'enabled' => self::asBool($it['enabled'] ?? true),
+                'mode' => strtolower(trim((string) ($it['mode'] ?? 'popup'))) === 'marquee' ? 'marquee' : 'popup',
+                'title' => (string) ($it['title'] ?? ''),
+                'content' => (string) ($it['content'] ?? ''),
+                'image' => (string) ($it['image'] ?? ''),
+                'link' => (string) ($it['link'] ?? ''),
+                'link_text' => (string) ($it['link_text'] ?? ''),
+                'closable' => self::asBool($it['closable'] ?? true),
+                'delay' => self::clampInt($it['delay'] ?? 0, 0, 0, 120),
+                'frequency' => $freq,
+                'speed' => self::clampInt($it['speed'] ?? 60, 60, 10, 400),
+                'position' => strtolower(trim((string) ($it['position'] ?? 'top'))) === 'bottom' ? 'bottom' : 'top',
+                'bg' => (string) ($it['bg'] ?? ''),
+                'color' => (string) ($it['color'] ?? ''),
+                'start' => (string) ($it['start'] ?? ''),
+                'end' => (string) ($it['end'] ?? ''),
+            ];
+        }
+        return $out;
+    }
+
     /**
      * 校验单个设置项。
      * @return array{0:bool, 1:mixed, 2:string} [是否通过, 规范化后的值, 失败原因]
@@ -300,7 +420,15 @@ final class Settings
                     if ($j === null && trim($v) !== 'null') {
                         return [false, null, "{$label} 不是合法 JSON"];
                     }
-                    return [true, $j, ''];
+                    $v = $j;
+                }
+                // 广告位：逐条校验 + 归一化（补齐 id / 裁剪字段），与 Python 版一致
+                if ($key === 'ads') {
+                    $err = self::validateAds($v);
+                    if ($err !== '') {
+                        return [false, null, $err];
+                    }
+                    $v = self::normalizeAds($v);
                 }
                 return [true, $v, ''];
             }

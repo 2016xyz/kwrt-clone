@@ -8,7 +8,7 @@
  *
  *       python3 php/scripts/gen_settings_schema.py
  *
- * 生成基准：130 项设置 / 14 个分组
+ * 生成基准：131 项设置 / 15 个分组
  */
 declare(strict_types=1);
 
@@ -20,6 +20,7 @@ final class SettingsSchema
     public const GROUPS = [
         ['brand', '品牌与外观', '站点名称、Logo、主题色'],
         ['home', '首页文案', '主标题、副标题、提示语'],
+        ['ads', '广告位', '前台弹出 / 滚动广告，支持 Markdown 与超链接'],
         ['links', '页脚与联系', '页脚补充文案、软件库入口、联系方式'],
         ['build', '构建设置', '构建后端、并发、默认版本、配额'],
         ['download', '下载与链接', '有效期、访问控制、外链策略'],
@@ -51,6 +52,21 @@ final class SettingsSchema
         ['k' => 'announcement', 'g' => 'home', 't' => 'textarea', 'label' => '站点公告', 'd' => '', 'max' => 600, 'hint' => '留空则不显示；显示在首页顶部'],
         ['k' => 'footer_text', 'g' => 'home', 't' => 'textarea', 'label' => '页脚文案', 'd' => '本站为 openwrt.ai 功能复刻演示站，固件由 OpenWrt 官方 ImageBuilder 实时编译。', 'max' => 400],
         ['k' => 'show_help', 'g' => 'home', 't' => 'bool', 'label' => '显示帮助入口', 'd' => true],
+        ['k' => 'ads', 'g' => 'ads', 't' => 'json', 'label' => '广告列表', 'd' => '[]', 'hint' => 'JSON 数组，每项一个广告，通常由下方可视化编辑器维护。字段说明：
+  enabled    是否启用（false 则不展示）
+  mode       popup=弹出模态框；marquee=滚动跑马灯
+  title      标题（弹出框显示为标题，滚动条显示为前置标签）
+  content    正文，支持 Markdown 与超链接
+  image      可选配图地址（弹出框顶部大图）
+  link       可选跳转地址；link_text 为按钮文字
+  closable   是否允许用户关闭（false 则强制展示）
+  delay      弹出延迟秒数（0=立即）
+  frequency  session=每个会话一次；always=每次访问；once=仅一次
+  speed      滚动速度（px/秒，10–400）
+  position   top/bottom，滚动条位置
+  bg / color 滚动条背景色与文字色
+  start/end  可选起止时间，如 2026-01-01（只写日期时 end 含当天）
+示例：[{"enabled":true,"mode":"popup","title":"公告","content":"新版上线，**欢迎体验** → [详情](https://example.com)","delay":1,"frequency":"session"}]'],
         ['k' => 'footer_moat_title', 'g' => 'links', 't' => 'text', 'label' => '页脚·壁垒标题', 'd' => '', 'max' => 80],
         ['k' => 'footer_moat_text', 'g' => 'links', 't' => 'textarea', 'label' => '页脚·壁垒说明', 'd' => '从设备识别、依赖求解、交叉编译到产物签发，全链路自研实现，不依赖任何第三方托管服务。', 'max' => 600],
         ['k' => 'packages_url', 'g' => 'links', 't' => 'text', 'label' => '自建软件库入口', 'd' => '/packages/', 'max' => 300],

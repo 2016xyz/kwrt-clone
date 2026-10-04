@@ -113,6 +113,8 @@ return static function (Router $r): void {
     // 检查本程序自身更新（GitHub）。GET 因为它是只读操作 —— 只查询更新源，
     // 不改动任何文件、不重启服务；也因此不需要 CSRF。
     $r->get('/api/v1/admin/update/check', [AdminController::class, 'updateCheck']);
+    // 一键更新：git pull + 清 OPcache（与 Python 版 /api/v1/admin/update/apply 对称）
+    $r->post('/api/v1/admin/update/apply', [AdminController::class, 'updateApply']);
     $r->get('/api/v1/admin/users',      [AdminController::class, 'users']);
     $r->post('/api/v1/admin/user',      [AdminController::class, 'userOp']);
     $r->post('/api/v1/admin/user/create', [AdminController::class, 'userCreate']);

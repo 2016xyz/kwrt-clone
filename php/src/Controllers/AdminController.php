@@ -172,6 +172,19 @@ final class AdminController
         json_out(Update::check($force));
     }
 
+    /**
+     * 一键更新：git pull --ff-only + 清 OPcache。
+     * 与 Python 版 /api/v1/admin/update/apply 对称；失败原因原样回传，便于排查。
+     */
+    public function updateApply(array $p): string
+    {
+        $u = $this->needAdmin();
+        $r = Update::apply();
+        Auth::audit('update_apply', (string) ($u['username'] ?? ''),
+            (string) ($r['message'] ?? ''));
+        json_out($r);
+    }
+
     private function overviewData(): array
     {
         $now = microtime(true);

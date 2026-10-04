@@ -161,5 +161,7 @@ window.KWRT = <?= js([
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="<?= e(asset('assets/js/app.js')) ?>" defer></script>
+<script src="<?= e(asset('assets/js/ads.js')) ?>" defer></script>
+<script src="<?= e(asset('assets/js/ads-boot.js')) ?>" defer></script>
 </body>
 </html>

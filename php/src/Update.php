@@ -484,4 +484,118 @@ final class Update
         }
         return '已是最新版本 ' . ($r['current_display'] ?? '');
     }
+
+    /* ------------------------------------------------------------------ *
+     * 一键更新（对应 Python 版 update.apply_update）
+     *
+     * 与 Python 版的差异：PHP 版不重启进程 —— php-fpm 由运维托管，
+     * 网页请求去重启它没人收得了场；这里改为「git pull + 清 OPcache」，
+     * 效果等价（代码与字节码都刷新），且不会把服务打死。
+     * ------------------------------------------------------------------ */
+
+    /** 在 PATH 里定位可执行文件；找不到返回 ''。 */
+    private static function which(string $bin): string
+    {
+        foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $d) {
+            if ($d === '') {
+                continue;
+            }
+            $p = rtrim($d, '/') . '/' . $bin;
+            if (is_file($p) && is_executable($p)) {
+                return $p;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * 执行一条命令（数组形式，不经过 shell，因此不受 shell 注入影响）。
+     * @param list<string> $cmd
+     * @return array{0:int,1:string,2:string} [退出码, stdout, stderr]
+     */
+    private static function run(array $cmd, string $cwd, int $timeout = 120): array
+    {
+        $des = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pr = @proc_open($cmd, $des, $pipes, $cwd);
+        if (!is_resource($pr)) {
+            return [-1, '', '无法启动进程（proc_open 可能被禁用）'];
+        }
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        $out = '';
+        $err = '';
+        $start = microtime(true);
+        while (true) {
+            $out .= (string) stream_get_contents($pipes[1]);
+            $err .= (string) stream_get_contents($pipes[2]);
+            $st = proc_get_status($pr);
+            if (!$st['running']) {
+                // 收尾：进程退出后管道里可能还有残余
+                $out .= (string) stream_get_contents($pipes[1]);
+                $err .= (string) stream_get_contents($pipes[2]);
+                break;
+            }
+            if (microtime(true) - $start > $timeout) {
+                proc_terminate($pr);
+                $err .= "\n[执行超时，已终止]";
+                break;
+            }
+            usleep(100000);
+        }
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($pr);
+        return [$code, $out, $err];
+    }
+
+    /** 一键更新：git pull --ff-only + 清 OPcache。 */
+    public static function apply(): array
+    {
+        $steps = [];
+        $root = Config::root();
+
+        $lock = rtrim(sys_get_temp_dir(), '/') . '/kwrt-update.lock';
+        $fp = @fopen($lock, 'c');
+        if ($fp === false || !flock($fp, LOCK_EX | LOCK_NB)) {
+            if (is_resource($fp)) {
+                fclose($fp);
+            }
+            return ['status' => 'error', 'message' => '另一个更新正在执行中，请稍后再试', 'steps' => $steps];
+        }
+
+        try {
+            $git = self::which('git');
+            if ($git === '') {
+                return ['status' => 'error', 'message' => '服务器未安装 git', 'steps' => $steps];
+            }
+            if (!is_dir($root . '/.git')) {
+                return ['status' => 'error', 'message' => '项目目录不是 git 仓库', 'steps' => $steps];
+            }
+
+            [$c, $o] = self::run([$git, 'rev-parse', '--abbrev-ref', 'HEAD'], $root, 10);
+            $branch = trim($o) !== '' ? trim($o) : 'main';
+
+            [$c, $o, $e] = self::run([$git, 'pull', '--ff-only', 'origin', $branch], $root, 120);
+            $steps[] = ['step' => 'git pull', 'ok' => $c === 0,
+                        'stdout' => self::safe($o), 'stderr' => self::safe($e)];
+            if ($c !== 0) {
+                return ['status' => 'error',
+                        'message' => 'git pull 失败：' . self::safe($e),
+                        'steps' => $steps];
+            }
+
+            if (function_exists('opcache_reset')) {
+                @opcache_reset();
+                $steps[] = ['step' => 'opcache_reset', 'ok' => true, 'stdout' => '已清空 OPcache'];
+            } else {
+                $steps[] = ['step' => 'opcache_reset', 'ok' => true, 'stdout' => '未启用 OPcache，跳过'];
+            }
+            self::clearCache();
+
+            return ['status' => 'ok', 'message' => '更新成功（PHP 版无需重启服务）', 'steps' => $steps];
+        } finally {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        }
+    }
 }

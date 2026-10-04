@@ -105,6 +105,8 @@ final class ApiController
             ],
             'devices' => (new PublicController())->devices(),
             'sponsor' => ['enabled' => (bool) ($s['sponsor.enabled'] ?? true)],
+            // 广告位：原始列表交由前端按 enabled / 时间窗 / 频率自行过滤渲染
+            'ads' => is_array($s['ads'] ?? null) ? $s['ads'] : [],
         ]);
     }
 

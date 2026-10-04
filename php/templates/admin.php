@@ -58,6 +58,11 @@ $t = $tab ?? 'ov';
                     : '更新源：' . e($__updRepo) ?>">检查更新</button>
         <button type="button" class="btn btn-xs btn-ghost" id="checkUpdateForce" hidden
                 title="忽略缓存，强制回源查询">强制</button>
+        <?php /* 一键更新：本机 git pull + 清 OPcache。与 Python 版同名接口对称。 */ ?>
+        <button type="button" class="btn btn-xs btn-outline" id="applyUpdateBtn"
+                data-url="/api/v1/admin/update/apply"
+                <?= $__updRepo === '' ? 'disabled' : '' ?>
+                title="在当前部署上执行 git pull --ff-only 并刷新缓存">一键更新</button>
         <span class="sm muted" id="updateMsg"></span>
         <div id="updateBox" hidden></div>
       </td></tr>
@@ -238,7 +243,11 @@ $t = $tab ?? 'ov';
           <?= e($it['label']) ?>
           <?php if (!empty($it['secret'])): ?><span class="tag">密钥</span><?php endif; ?>
         </label>
-        <?php if ($it['t'] === 'bool'): ?>
+        <?php if ($it['k'] === 'ads'): ?>
+          <?php /* 广告位：可视化编辑器，提交时把 JSON 写回下面这个隐藏字段 */ ?>
+          <div id="adsEditor" class="ads-editor" data-ads="<?= e((string) $it['value']) ?>"></div>
+          <textarea class="input" name="ads" id="adsJson" rows="2" hidden><?= e((string) $it['value']) ?></textarea>
+        <?php elseif ($it['t'] === 'bool'): ?>
           <label class="chk">
             <input type="checkbox" name="<?= e($it['k']) ?>" value="1"
                    <?= $it['value'] ? 'checked' : '' ?>>
