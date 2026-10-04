@@ -162,9 +162,16 @@ final class Archive
             throw new \RuntimeException('服务器未安装 tar，无法解压文件包');
         }
         $lower = strtolower($archive);
-        $flags = str_ends_with($lower, '.tar') ? '-tf' : '-tzf';
+        $isPlain = str_ends_with($lower, '.tar');
+        // ★ 必须显式给出两个不同的 flag，不能靠 str_replace 从 -tzf 推导 -tvf：
+        //   '-tzf' 里并不含子串 '-tf'（是 - t z f），替换会静默不生效，
+        //   于是类型检查那一步变成拿名字列表当类型列表看，恒不命中 ——
+        //   符号链接成员就会被放过去。（自测抓到的：tar.gz 符号链接用例失败）
+        $listFlag = $isPlain ? '-tf' : '-tzf';
+        $verbFlag = $isPlain ? '-tvf' : '-tzvf';
+        $xFlag = $isPlain ? '-xf' : '-xzf';
 
-        foreach (self::lines([$tar, $flags, $archive]) as $nm) {
+        foreach (self::lines([$tar, $listFlag, $archive]) as $nm) {
             if ($nm === '') {
                 continue;
             }
@@ -173,7 +180,7 @@ final class Archive
             }
         }
         // 类型检查：l=符号链接 h=硬链接 b/c=设备 p=管道 s=socket
-        foreach (self::lines([$tar, str_replace('-tf', '-tvf', $flags), $archive]) as $line) {
+        foreach (self::lines([$tar, $verbFlag, $archive]) as $line) {
             if ($line === '') {
                 continue;
             }
@@ -187,7 +194,7 @@ final class Archive
             }
         }
         self::lines(array_merge(
-            [$tar, str_ends_with($lower, '.tar') ? '-xf' : '-xzf', $archive],
+            [$tar, $xFlag, $archive],
             ['--no-same-owner', '--no-overwrite-dir', '-C', $base]));
     }
 
