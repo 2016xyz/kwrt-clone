@@ -53,7 +53,12 @@ PORT=9000 ./run-php.sh
 KWRT_ADMIN_PASSWORD='你的强密码' php php/scripts/init_admin.php
 ```
 
-（测试用脚手架：`php php/scripts/make_admin.php <用户名> <密码>`）
+（测试用脚手架：`KWRT_DB=/tmp/test.db php php/scripts/make_admin.php <用户名> <密码>`）
+
+> ⚠️ `make_admin.php` 会**先删除再重建**目标用户 —— 它是销毁性脚本，不是"创建"脚本。
+> 因此它强制要求：显式给出用户名与口令、显式设置 `KWRT_DB` 指向测试库；
+> 若 `KWRT_DB` 看起来像生产库，还要再加 `--i-know-this-is-destructive`。
+> **生产环境初始化管理员请用 `init_admin.php`。**
 
 ### Nginx + PHP-FPM（生产推荐）
 
@@ -318,7 +323,7 @@ php/
 └── scripts/
     ├── gen_settings_schema.py  从 Python 侧生成设置 schema
     ├── build-worker.php        构建 worker（由队列 nohup 起来）
-    ├── make_admin.php          测试用：创建管理员
+    ├── make_admin.php          测试用：重置管理员（销毁性，需 KWRT_DB 指向测试库）
     └── init_admin.php          生产用：初始化首个管理员
 ```
 
