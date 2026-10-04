@@ -713,14 +713,56 @@
       }
 
       /* ---------------- 赞助 / 支付 ---------------- */
+      /* 自定义金额的即时校验与「预计发放天数」预览。
+         折算单价来自 /api/v1/site 的 sponsor_per_day（服务端算出的**有效**单价：
+         后台配了用配的，没配则取套餐里最划算的那个）。
+         这里算出来的天数只用于提示 —— 真正的天数永远由服务端 _custom_days() 决定。 */
+      const amountRaw = ref('');                                   // 输入框原始字符串
+      const customAmount = computed(function () { return Number(amountRaw.value || 0); });
+      const amtMin = computed(function () { return Number(site.value['sponsor.min_amount'] || 1); });
+      const amtMax = computed(function () { return Number(site.value['sponsor.max_amount'] || 99999); });
+      const perDay = computed(function () { return Number(site.value.sponsor_per_day || 1); });
+      const amountDays = computed(function () {
+        const a = customAmount.value;
+        if (!(a > 0)) return 0;
+        return Math.min(3650, Math.max(1, Math.floor(a / (perDay.value || 1))));
+      });
+      const amountErr = computed(function () {
+        if (!String(amountRaw.value).trim()) return '';
+        const a = customAmount.value;
+        if (!(a > 0)) return '请输入大于 0 的金额';
+        if (a < amtMin.value) return '金额不能低于 ' + amtMin.value;
+        if (a > amtMax.value) return '金额不能高于 ' + amtMax.value;
+        return '';
+      });
+      const canSubmit = computed(function () {
+        if (String(amountRaw.value).trim()) return !amountErr.value;
+        return !!chosenTier.value;
+      });
+      function pickTier(t) {
+        chosenTier.value = t.name;
+        amountRaw.value = '';
+      }
+      function clearAmount() { amountRaw.value = ''; }
+      function onAmountInput() {
+        // 一旦填了金额就和套餐互斥 —— 两个都给服务端会以套餐优先，用户会困惑
+        if (customAmount.value > 0) chosenTier.value = '';
+      }
+
       async function doClaim() {
-        if (!chosenTier.value) return;
+        const o = payOrder.value;
+        const body = o && o.tier ? { tier: o.tier }
+          : (o ? { amount: String(o.amount) }
+            : (customAmount.value > 0 ? { amount: String(customAmount.value) }
+              : { tier: chosenTier.value }));
+        if (!body.tier && !body.amount) return;
         claiming.value = true;
         try {
-          const r = await K.postForm('/api/v1/sponsor/claim', { tier: chosenTier.value });
+          const r = await K.postForm('/api/v1/sponsor/claim', body);
           K.toast(r.detail || '已提交', 'success');
+          if (payOrder.value) payOrder.value.state = (r.status === 'ok' ? 'paid' : 'pending');
           await loadUser();
-          openSponsor.value = false;
+          if (r.status === 'ok') openSponsor.value = false;
         } catch (e) { K.toast(e.message || '提交失败', 'error'); }
         finally { claiming.value = false; }
       }
@@ -728,19 +770,30 @@
         if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
         if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
       }
-      async function startPay() {
-        if (!chosenTier.value) return;
+      /* 统一下单：用户输入金额（或选套餐）点按钮 → 服务端返回「收款码图片地址」
+           mode=alipay  有支付宝当面付，url 指向该订单的二维码（轮询到账）
+           mode=manual  没有当面付，url 指向服务端**实时生成**的收款码（扫码后自行确认） */
+      async function startOrder() {
+        if (!canSubmit.value) { K.toast(amountErr.value || '请先选择套餐或输入金额', 'error'); return; }
         if (!user.value.logged_in) { location.href = '/login/?next=/'; return; }
         paying.value = true;
         try {
-          const r = await K.postForm('/api/v1/sponsor/pay', { tier: chosenTier.value });
+          const body = (customAmount.value > 0 && !chosenTier.value)
+            ? { amount: String(customAmount.value) }
+            : { tier: chosenTier.value };
+          const r = await K.postForm('/api/v1/sponsor/order', body);
+          const mode = r.mode || 'alipay';
           payOrder.value = {
-            out_trade_no: r.out_trade_no,
-            qr_img: '/api/v1/sponsor/pay/' + encodeURIComponent(r.out_trade_no) + '/qr.png',
-            amount: r.amount, days: r.days, state: 'waiting',
+            mode: mode,
+            out_trade_no: r.out_trade_no || '',
+            tier: r.tier || '',
+            qr_img: r.url,
+            amount: r.amount, days: r.days,
+            state: mode === 'alipay' ? 'waiting' : 'unpaid',
             deadline: Date.now() + (r.expires_in || 900) * 1000,
             leftText: fmtLeft(r.expires_in || 900),
           };
+          if (mode !== 'alipay') return;      // 手动收款码不轮询，付款后由用户点确认
           tickTimer = setInterval(function () {
             if (!payOrder.value) return;
             const left = Math.floor((payOrder.value.deadline - Date.now()) / 1000);
@@ -748,7 +801,7 @@
             payOrder.value.leftText = fmtLeft(left);
           }, 1000);
           schedulePayPoll(1500);
-        } catch (e) { K.toast(e.message || '下单失败', 'error'); }
+        } catch (e) { K.toast(e.message || '生成收款码失败', 'error'); }
         finally { paying.value = false; }
       }
       function fmtLeft(s) {
@@ -827,6 +880,9 @@
         site, user, devices, booting, menu, query, openList, hl, device, images, branch,
         availablePkgs, commonPkgs, selectedPkgs, pkgInput, dragOver, job, building,
         openSponsor, tiers, pay, chosenTier, claiming, paying, payOrder, year,
+        // 自定义金额 → 实时生成收款码
+        amountRaw, amtMin, amtMax, amountDays, amountErr, canSubmit,
+        pickTier, clearAmount, onAmountInput,
         // 我的订单与退款
         sponsorOrders, refundEnabled, refundTarget, refundReason, refundDetail,
         refundSending, loadOrders, openRefund, closeRefundApply, submitRefund, orderStatusText,
@@ -840,7 +896,7 @@
         // 配额展示
         quota: computed(function () { return site.value.default_quota || 12; }),
         move, pickHighlighted, pickDevice, clearDevice, hasPkg, togglePkg, removePkg, addPkg,
-        onFilePick, onDrop, startBuild, cancelBuild, doClaim, startPay, closeSponsor, doLogout,
+        onFilePick, onDrop, startBuild, cancelBuild, doClaim, startOrder, closeSponsor, doLogout,
         buildDefaultsScript,
         K,
       };

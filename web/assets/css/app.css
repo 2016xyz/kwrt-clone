@@ -1518,3 +1518,29 @@ table.table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .ad-md del { color: var(--text-muted); }
 .ad-marquee .ad-md { display: inline; }
 .ad-marquee .ad-md p, .ad-marquee .ad-md ul, .ad-marquee .ad-md ol { display: inline; margin: 0; }
+
+
+/* ================= 赞助：自定义金额 → 实时生成收款码 ================= */
+.amount-box {
+  border: 1px dashed var(--line, rgba(128,128,128,.28));
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  background: var(--bg-soft, rgba(128,128,128,.05));
+}
+.amount-box .field-label { display: block; margin-bottom: 6px; font-weight: 600; }
+.amount-row { display: flex; align-items: stretch; gap: 8px; }
+.amount-row .amount-sym {
+  display: flex; align-items: center; padding: 0 10px;
+  border: 1px solid var(--line, rgba(128,128,128,.28));
+  border-right: 0; border-radius: var(--r-md) 0 0 var(--r-md);
+  background: var(--bg-soft, rgba(128,128,128,.06));
+  font-weight: 600; color: var(--text-muted);
+}
+.amount-row .amount-sym + .input { border-radius: 0 var(--r-md) var(--r-md) 0; }
+.amount-row .input { flex: 1 1 auto; min-width: 0; }
+.amount-box .field-hint { margin-top: 6px; }
+@media (max-width: 480px) {
+  .amount-row { flex-wrap: wrap; }
+  .amount-row .input { border-radius: var(--r-md); }
+  .amount-row .amount-sym { border-right: 1px solid var(--line, rgba(128,128,128,.28)); }
+}

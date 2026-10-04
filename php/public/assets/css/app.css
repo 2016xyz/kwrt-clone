@@ -297,3 +297,25 @@ select.input{cursor:pointer}
 .ad-md .ad-inline-img{max-width:100%;border-radius:var(--r-sm);vertical-align:middle}
 .ad-marquee .ad-md{display:inline}
 .ad-marquee .ad-md p,.ad-marquee .ad-md ul,.ad-marquee .ad-md ol{display:inline;margin:0}
+
+/* ================= 赞助：自定义金额 → 实时生成收款码 ================= */
+.amount-box { margin: 18px 0; }
+.amount-box h3 { margin-bottom: 10px; }
+.amount-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.amount-row .amount-sym {
+  display: flex; align-items: center; padding: 0 10px;
+  border: 1px solid var(--line, rgba(128,128,128,.28)); border-right: 0;
+  border-radius: var(--r-md, 6px) 0 0 var(--r-md, 6px);
+  background: rgba(128,128,128,.06); font-weight: 600;
+}
+.amount-row .amount-sym + .input { border-radius: 0 var(--r-md, 6px) var(--r-md, 6px) 0; }
+.amount-row .input { flex: 1 1 180px; min-width: 0; }
+.amount-row .btn { flex: 0 0 auto; }
+#payAmount { margin: 6px 0 2px; font-weight: 600; }
+#payTip { margin: 6px 0 10px; }
+#payConfirm { margin-top: 4px; }
+@media (max-width: 480px) {
+  .amount-row .amount-sym { border-right: 1px solid var(--line, rgba(128,128,128,.28)); }
+  .amount-row .amount-sym + .input { border-radius: var(--r-md, 6px); }
+  .amount-row .btn { flex: 1 1 100%; }
+}

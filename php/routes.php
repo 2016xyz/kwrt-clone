@@ -94,6 +94,10 @@ return static function (Router $r): void {
 
     // ---------------------------------------------------------------- 赞助 / 支付
     $r->post('/api/v1/sponsor/claim',   [ApiController::class, 'sponsorClaim']);
+    // 统一下单：前端「输入金额 → 点击」走这里（有当面付则真实下单，无则回落动态收款码）
+    $r->post('/api/v1/sponsor/order',   [ApiController::class, 'sponsorOrder']);
+    // 动态收款码图片地址：服务端按金额实时生成（或 302 到站长配的固定图）
+    $r->get('/api/v1/sponsor/qr.png',   [ApiController::class, 'sponsorQr']);
     $r->post('/api/v1/sponsor/pay',     [ApiController::class, 'sponsorPay']);
     $r->get('/api/v1/sponsor/orders',   [ApiController::class, 'sponsorOrders']);
     $r->get('/api/v1/sponsor/pay/{out_trade_no}', [ApiController::class, 'sponsorPayStatus']);

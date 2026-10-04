@@ -76,6 +76,13 @@ final class PublicController
             'note'      => (string) Settings::get('sponsor.note', ''),
             'payQr'     => (string) Settings::get('sponsor.pay_qr', ''),
             'currency'  => (string) Settings::get('sponsor.currency', 'CNY'),
+            // ★ 动态收款码：用户输入金额 → 点击 → 服务端实时生成图片地址。
+            //   模板据此画金额输入框并做即时校验；真值仍由服务端 Sponsor::resolve 决定。
+            'customAmount' => Settings::bool('sponsor.custom_amount', true),
+            'minAmount'    => \Kwrt\Sponsor::amountRange()[0],
+            'maxAmount'    => \Kwrt\Sponsor::amountRange()[1],
+            'perDay'       => \Kwrt\Sponsor::perDayPrice(),
+            'payAvailable' => \Kwrt\Pay::available(),
         ]);
     }
 

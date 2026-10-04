@@ -44,6 +44,8 @@ window.KWRT = <?= js([
     'user'     => $u ? ['username' => $u['username'], 'admin' => is_admin(), 'sponsor' => is_sponsor()] : null,
     'nav'      => $navItems,
     'pollMs'   => (int) setting('pay.poll_seconds', 3) * 1000,
+    // 货币符号要跟着后台的「货币单位」走（赞助金额展示用），不能在前端硬编码 ¥
+    'currency' => (string) setting('sponsor.currency', 'CNY'),
     'pwdMin'   => 8,
 ]) ?>;
 </script>

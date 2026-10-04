@@ -606,12 +606,23 @@ final class AdminController
         foreach ($kv as $k => $v) {
             $this->guardSwitch((string) $k, $v);
         }
+        // 跨字段一致性：blocked 的键直接剔除（保留库里旧值）并汇报为错误，
+        // warnings 照常保存但回一条提示，避免站长配出一个"点了没反应"的组合。
+        $cc = Settings::crossCheck($kv);
+        foreach (($cc['blocked'] ?? []) as $bk => $bv) {
+            unset($kv[$bk]);
+        }
+        if (($cc['blocked'] ?? []) || !$kv) {
+            json_out(['status' => 'error', 'detail' => '配置之间存在冲突，未保存',
+                      'errors' => $cc['blocked']], 400);
+        }
         $r = Settings::setMany($kv);
         if (($r['status'] ?? '') !== 'ok') {
             json_out($r, 400);
         }
         Auth::audit('setting_set_bulk', '', ['count' => count($kv), 'keys' => array_keys($kv)]);
-        json_out(['status' => 'ok', 'saved' => count($kv)]);
+        json_out(['status' => 'ok', 'saved' => count($kv),
+                  'warnings' => $cc['warnings'] ?? []]);
     }
 
     /**

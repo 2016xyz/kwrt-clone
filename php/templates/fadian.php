@@ -64,13 +64,39 @@ $sym = $SYM[$currency ?? 'CNY'] ?? '¥';
 </section>
 <?php endif; ?>
 
+<?php if ($u && ($customAmount ?? false)): ?>
+<!-- ★ 自定义金额：输入金额 → 点「生成收款码」→ 服务端按金额**实时生成**图片地址。
+     金额区间 / 折算单价都来自后台设置；真正的天数和金额由服务端再算一次，前端只做提示。 -->
+<section class="card amount-box"
+         data-min="<?= e((string) ($minAmount ?? 1)) ?>"
+         data-max="<?= e((string) ($maxAmount ?? 99999)) ?>"
+         data-perday="<?= e((string) ($perDay ?? 1)) ?>">
+  <h3>自定义金额</h3>
+  <div class="amount-row">
+    <span class="amount-sym"><?= e($sym) ?></span>
+    <input id="sponsorAmount" class="input" type="number" inputmode="decimal" step="0.01"
+           min="<?= e((string) ($minAmount ?? 1)) ?>" max="<?= e((string) ($maxAmount ?? 99999)) ?>"
+           placeholder="请输入 <?= e((string) ($minAmount ?? 1)) ?> ~ <?= e((string) ($maxAmount ?? 99999)) ?> 之间的金额">
+    <button class="btn btn-primary" type="button" id="sponsorAmountBtn" disabled>生成收款码</button>
+  </div>
+  <p class="muted sm" id="sponsorAmountHint">
+    输入金额后点击按钮，即可生成对应金额的收款码。也可以直接选上面的套餐。
+  </p>
+</section>
+<?php endif; ?>
+
 <div class="modal" id="payModal" hidden>
   <div class="modal-mask" data-close></div>
   <div class="modal-box">
     <button class="modal-x" type="button" data-close aria-label="关闭">×</button>
     <h3>扫码支付</h3>
     <div id="payQr" class="pay-qr"></div>
+    <p class="mono sm" id="payAmount"></p>
     <p class="mono sm" id="payNo"></p>
     <p class="muted sm" id="payState">等待支付…</p>
+    <p class="muted sm" id="payTip" hidden></p>
+    <button class="btn btn-primary btn-block" type="button" id="payConfirm" hidden>
+      我已完成赞助，提交确认
+    </button>
   </div>
 </div>

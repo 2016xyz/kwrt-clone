@@ -1895,6 +1895,9 @@ def api_site(request: Request):
                     "reset": captcha.enabled_for_reset()}
     d["sponsor_tiers"] = SS.get("sponsor.tiers") or []
     d["currency"] = SS.get("sponsor.currency") or "CNY"
+    # 自定义金额折算天数的**有效单价**：前端用它做「预计发放 N 天」的即时预览。
+    # 真值仍以服务端 _custom_days() 为准（前端算的只是给用户看的提示）。
+    d["sponsor_per_day"] = _per_day_price()
     d["build"] = backends.info()
     # 在线支付可用性 + 邮箱验证开关（均为「能力开关」，不含任何密钥）
     d["pay"] = {
@@ -2092,49 +2095,179 @@ def api_my_downloads(request: Request):
 # --------------------------------------------------------------------------- #
 @app.get("/api/v1/sponsor/tiers")
 def sponsor_tiers():
+    lo, hi = _amount_range()
     return {"enabled": SS.get("sponsor.enabled"), "currency": SS.get("sponsor.currency") or "CNY",
             "note": SS.get("sponsor.note") or "", "tiers": SS.get("sponsor.tiers") or [],
-            "pay_qr": SS.get("sponsor.pay_qr") or ""}
+            "pay_qr": SS.get("sponsor.pay_qr") or "",
+            # 动态收款码的前端参数：自定义金额开关、区间、来源、可否自助确认
+            "custom_amount": bool(SS.get("sponsor.custom_amount")),
+            "min_amount": lo, "max_amount": hi,
+            "qr_kind": str(SS.get("sponsor.qr_kind") or "image"),
+            "pay_available": pay.available()}
+
+
+@app.post("/api/v1/sponsor/order")
+def sponsor_order(request: Request, tier: str = Form(""), amount: float = Form(0)):
+    """统一下单入口 —— 用户在赞助页**输入金额（或选套餐）点击**后调用。
+
+    返回的 `mode` 决定前端拿到的是哪种"收款码图片地址"：
+
+      · alipay —— 站点开了支付宝当面付：真实下单，返回该笔订单的二维码图片地址
+                  （`/api/v1/sponsor/pay/{订单}/qr.png`），金额由支付宝带货。
+      · manual —— 没开当面付：返回**服务端实时生成**的收款码图片地址
+                  （`/api/v1/sponsor/qr.png?amount=…`），用户扫码付款后
+                  自行点「我已完成赞助，提交确认」。
+
+    两种模式都只返回 amount / days 供**展示**。金额与天数的真值一律由服务端
+    `_resolve_sponsor_choice()` 决定，前端不得参与计算，也不得回传 days。
+    """
+    u = current_user(request)
+    if not u:
+        return JSONResponse({"detail": "请先登录"}, status_code=401)
+    if not bool(SS.get("sponsor.enabled")):
+        return JSONResponse({"detail": "本站未开启赞助"}, status_code=400)
+
+    choice, err = _resolve_sponsor_choice(tier, amount)
+    if not choice:
+        return JSONResponse({"detail": err}, status_code=400)
+    amt, days, tier_name = choice
+    currency = SS.get("sponsor.currency") or "CNY"
+
+    # ---------------- 有支付宝：走真实下单 ----------------
+    if pay.available():
+        ttl_min = int(str(SS.get("pay.order_ttl_minutes") or 15))
+        now = time.time()
+        with db() as c:
+            old = c.execute("SELECT * FROM pay_orders WHERE username=? AND status IN ('created','waiting') "
+                            "AND tier_name=? AND amount=? AND expires>? ORDER BY id DESC LIMIT 1",
+                            (u["username"], tier_name, amt, now)).fetchone()
+        if old and old["qr_code"]:
+            otn = old["out_trade_no"]
+            return {"status": "ok", "mode": "alipay", "out_trade_no": otn,
+                    "url": f"/api/v1/sponsor/pay/{otn}/qr.png",
+                    "amount": old["amount"], "days": old["days"], "tier": old["tier_name"],
+                    "currency": currency, "expires_in": max(0, int(old["expires"] - now)),
+                    "reused": True}
+
+        otn = _out_trade_no()
+        with db() as c:
+            c.execute("INSERT INTO pay_orders(out_trade_no,username,tier_name,amount,days,status,"
+                      "created,expires) VALUES(?,?,?,?,?,'created',?,?)",
+                      (otn, u["username"], tier_name, amt, days, now, now + ttl_min * 60))
+        r = pay.precreate(otn, f"{amt:.2f}", tier_name, _pay_notify_url(request))
+        if not r.get("ok"):
+            with db() as c:
+                c.execute("UPDATE pay_orders SET status='failed', raw=? WHERE out_trade_no=?",
+                          (json.dumps({"error": r.get("error")}, ensure_ascii=False), otn))
+            audit(u["username"], "pay_create_failed", u["username"],
+                  f"out_trade_no={otn} err={r.get('error')}", client_ip(request))
+            return JSONResponse({"detail": f"下单失败：{r.get('error')}"}, status_code=502)
+        with db() as c:
+            c.execute("UPDATE pay_orders SET qr_code=? WHERE out_trade_no=?", (r["qr_code"], otn))
+        audit(u["username"], "pay_create", u["username"],
+              f"out_trade_no={otn} amount={amt} tier={tier_name} verified={r.get('verified')}",
+              client_ip(request))
+        return {"status": "ok", "mode": "alipay", "out_trade_no": otn,
+                "url": f"/api/v1/sponsor/pay/{otn}/qr.png",
+                "amount": amt, "days": days, "tier": tier_name, "currency": currency,
+                "expires_in": ttl_min * 60, "reused": False,
+                "sign_verified": bool(r.get("verified"))}
+
+    # ---------------- 没支付宝：回落到服务端实时生成的收款码 ----------------
+    problem = _qr_config_problem()
+    if problem:
+        return JSONResponse({"detail": problem}, status_code=503)
+    return {"status": "ok", "mode": "manual",
+            "url": f"/api/v1/sponsor/qr.png?amount={amt:g}",
+            "qr_kind": str(SS.get("sponsor.qr_kind") or "image"),
+            "amount": amt, "days": days, "tier": tier_name, "currency": currency,
+            "self_confirm": bool(SS.get("sponsor.custom_amount_auto")) or bool(tier)}
+
+
+@app.get("/api/v1/sponsor/qr.png")
+def sponsor_qr(request: Request, amount: float = 0):
+    """★ 「收款码图片地址」的服务端入口 —— 用户输入金额点击后，前端直接把它当图片加载。
+
+      kind=image → 302 跳到站长填的固定图片地址（不重复渲染，也不做代理）；
+      kind=text  → 把 {amount} 替换进站长填的内容，用零依赖 PNG 编码器实时出图。
+
+    为什么要登录：收款码内容里可能带站长的收款标识，不该给匿名用户当图床用。
+    为什么金额要在服务端校验范围：这是用户输入，直接进图片内容，必须过一遍白名单式的数值校验。
+    """
+    u = current_user(request)
+    if not u:
+        return JSONResponse({"detail": "请先登录"}, status_code=401)
+    try:
+        amt = float(amount or 0)
+    except (TypeError, ValueError):
+        return JSONResponse({"detail": "金额必须是数字"}, status_code=400)
+    if amt != amt or amt in (float("inf"), float("-inf")):
+        return JSONResponse({"detail": "金额必须是有限数字"}, status_code=400)
+    if amt <= 0:
+        return JSONResponse({"detail": "缺少金额参数"}, status_code=400)
+    lo, hi = _amount_range()
+    if amt < lo or amt > hi:
+        return JSONResponse({"detail": f"金额需在 {lo} ~ {hi} 之间"}, status_code=400)
+    amt = round(amt, 2)
+
+    kind = str(SS.get("sponsor.qr_kind") or "image")
+    if kind == "image":
+        url = str(SS.get("sponsor.pay_qr") or "").strip()
+        if not url:
+            return JSONResponse({"detail": "站长尚未配置收款码图片地址"}, status_code=404)
+        return RedirectResponse(url, status_code=302)
+
+    tpl = str(SS.get("sponsor.qr_text") or "").strip()
+    if not tpl:
+        return JSONResponse({"detail": "站长尚未配置收款码内容 / 链接"}, status_code=404)
+    png = pay.qr_png_bytes(_render_qr_text(tpl, amt))
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=300"})
 
 
 @app.post("/api/v1/sponsor/claim")
 def sponsor_claim(request: Request, tier: str = Form(""), amount: float = Form(0),
                   note: str = Form(""), email: str = Form("")):
     """
-    用户声明已完成赞助。
-    自助模式（sponsor.auto_approve=true）立即生效；否则记为待审核由管理员确认。
+    用户声明已完成赞助（选了套餐，或输入了自定义金额）。
+
+    自助模式（sponsor.auto_approve / sponsor.custom_amount_auto）立即生效；
+    否则记为待审核由管理员确认。
+
+    ★ 金额与天数只能来自服务端的解析结果：
+      · 选套餐 —— 用套餐里的 amount/days，前端传什么都不看；
+      · 自定义金额 —— amount 是用户的申报值（要的就是这个），但 **days 由
+        _custom_days() 折算**，前端同样无权指定。
+      原实现的注释写着「绝不采信前端的 amount/days」；自定义金额放开了 amount
+      这一半，days 那一半必须继续守住，否则就是"1 元换 10 年"。
     """
     u = current_user(request)
     if not u:
         return JSONResponse({"detail": "请先登录"}, status_code=401)
-    tiers = SS.get("sponsor.tiers") or []
-    chosen = None
+    if not bool(SS.get("sponsor.enabled")):
+        return JSONResponse({"detail": "本站未开启赞助"}, status_code=400)
+
+    choice, err = _resolve_sponsor_choice(tier, amount)
+    if not choice:
+        return JSONResponse({"detail": err}, status_code=400)
+    amt, days, tier_name = choice
+
+    # 自助确认的开关分两档：套餐看 sponsor.auto_approve（默认开），
+    # 自定义金额看 sponsor.custom_amount_auto（默认 **关**）。
+    # 理由见该设置的 hint：套餐金额是站长定的，风险有界；自定义金额是用户填的，无界。
     if tier:
-        for t in tiers:
-            if str(t.get("name")) == tier:
-                chosen = t
-                break
-    # 金额与天数只能来自管理员配置的套餐，绝不采信前端的 amount/days。
-    # 原实现 unmatched 时用 float(amount)，开启 auto_approve 后前端可自报任意
-    # 金额，赞助统计与 sponsor_amount 归集都会被污染。
-    if not chosen:
-        return JSONResponse({"detail": "套餐不存在，请从页面列出的套餐中选择"}, status_code=400)
-    days = int(chosen.get("days", 30))
-    amt = float(chosen.get("amount") or 0)
-    # 安全默认：未显式开启自动通过时，一律走人工审核
-    auto = bool(SS.get("sponsor.auto_approve", False)) and SS.get("sponsor.auto_approve") in (True, "1", "true")
+        auto = bool(SS.get("sponsor.auto_approve"))
+    else:
+        auto = bool(SS.get("sponsor.custom_amount_auto"))
     now = time.time()
     if auto:
-        until = now + days * 86400
-        with db() as c:
-            c.execute("UPDATE users SET sponsor=1, sponsor_until=?, sponsor_tier=?, "
-                      "sponsor_amount=? WHERE username=?",
-                      (until, (chosen or {}).get("name", "自定义"), amt, u["username"]))
-            if email:
+        until = _activate_sponsor(u["username"], days, tier_name, amt)
+        if email:
+            with db() as c:
                 c.execute("UPDATE users SET email=? WHERE username=? AND (email IS NULL OR email='')",
                           (email, u["username"]))
         audit(u["username"], "sponsor_claim", u["username"],
-              f"tier={tier} amount={amt} auto=true", client_ip(request))
+              f"tier={tier_name} amount={amt} days={days} auto=true", client_ip(request))
         return {"status": "ok", "sponsor": True, "until": until,
                 "detail": f"已激活赞助权益 {days} 天"}
     with db() as c:
@@ -2142,10 +2275,11 @@ def sponsor_claim(request: Request, tier: str = Form(""), amount: float = Form(0
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, tier TEXT,
             amount REAL, note TEXT, status TEXT, created REAL)""")
         c.execute("INSERT INTO sponsor_claims(username,tier,amount,note,status,created) "
-                  "VALUES(?,?,?,?,?,?)", (u["username"], chosen.get("name") if chosen else "自定义",
-                                          amt, note, "pending", now))
-    audit(u["username"], "sponsor_claim", u["username"], f"tier={tier} pending", client_ip(request))
-    return {"status": "pending", "detail": "已提交，管理员确认后生效"}
+                  "VALUES(?,?,?,?,?,?)", (u["username"], tier_name, amt, note, "pending", now))
+    audit(u["username"], "sponsor_claim", u["username"],
+          f"tier={tier_name} amount={amt} days={days} pending", client_ip(request))
+    return {"status": "pending", "days": days, "amount": amt,
+            "detail": f"已提交，管理员确认后生效（将发放 {days} 天）"}
 
 
 # --------------------------------------------------------------------------- #
@@ -2177,6 +2311,135 @@ def _find_tier(name: str):
         if isinstance(t, dict) and (t.get("name") == name or str(t.get("name")) == str(name)):
             return t
     return None
+
+
+# --------------------------------------------------------------------------- #
+# 动态收款码：金额 → 天数折算 / 收款码内容渲染
+# --------------------------------------------------------------------------- #
+def _amount_range():
+    """自定义金额的允许区间 (lo, hi)。
+
+    后台的跨字段校验会拦下「min > max」的保存，但直接改库、旧版本残留配置
+    仍可能让库里出现反着的区间 —— 这里再兜一次，保证运行时永远 lo <= hi。
+    """
+    def _int(key, dflt):
+        try:
+            return int(str(SS.get(key) if SS.get(key) is not None else dflt))
+        except (TypeError, ValueError):
+            return dflt
+    lo = max(1, _int("sponsor.min_amount", 1))
+    hi = max(lo, _int("sponsor.max_amount", 99999))
+    return lo, hi
+
+
+def _per_day_price():
+    """自定义金额的每天单价。
+
+    优先用站长配的 sponsor.per_day_price；填 0 或非法时，自动取套餐里
+    **最划算**（amount/days 最小）的那个套餐折算 —— 这样站长只配套餐也能用。
+    两者都没有时按 1 兜底（1 个货币单位 = 1 天），是可预测的，不会凭空送天数。
+    """
+    try:
+        rate = float(str(SS.get("sponsor.per_day_price") or 0))
+    except (TypeError, ValueError):
+        rate = 0.0
+    if rate > 0:
+        return rate
+    tiers = SS.get("sponsor.tiers")
+    rates = []
+    if isinstance(tiers, list):
+        for t in tiers:
+            if not isinstance(t, dict):
+                continue
+            try:
+                a = float(t.get("amount") or 0)
+                d = int(t.get("days") or 0)
+            except (TypeError, ValueError):
+                continue
+            if a > 0 and d > 0:
+                rates.append(a / d)
+    return min(rates) if rates else 1.0
+
+
+def _custom_days(amount: float) -> int:
+    """把自定义金额折算成赞助天数。
+
+    下限 1 天（付了钱就该有权益），上限 3650 天（10 年）——
+    上限是必要的：否则一个 99999 的金额配上很小的单价会算出几十年，
+    既无意义，也会把 sponsor_until 推到一个近乎"永久"的值。
+    """
+    rate = _per_day_price()
+    days = int(float(amount) / rate) if rate > 0 else 0
+    return max(1, min(days, 3650))
+
+
+def _resolve_sponsor_choice(tier: str, amount: float):
+    """把用户的选择解析成 ((金额, 天数, 套餐名), "") 或 (None, 错误信息)。
+
+    ★ 天数**永远由服务端算**：选套餐走套餐的 days，自定义金额走 _custom_days()。
+      绝不采信前端传来的 days —— 原实现就写死了"绝不采信前端的 amount/days"，
+      自定义金额放开了 amount，但 days 这条底线必须守住，
+      否则前端可以自报「付 1 元、给 3650 天」。
+    """
+    if tier:
+        t = _find_tier(tier)
+        if not t:
+            return None, "套餐不存在，请从页面列出的套餐中选择"
+        try:
+            amt = float(t.get("amount") or 0)
+            days = int(t.get("days") or 0)
+        except (TypeError, ValueError):
+            return None, "该套餐的金额或天数无效，请联系站长"
+        if amt <= 0 or days <= 0:
+            return None, "该套餐的金额或天数无效，请联系站长"
+        return (amt, days, str(t.get("name") or tier)), ""
+
+    if not bool(SS.get("sponsor.custom_amount")):
+        return None, "本站未开放自定义金额，请从页面列出的套餐中选择"
+
+    try:
+        amt = float(amount or 0)
+    except (TypeError, ValueError):
+        return None, "金额必须是数字"
+    if amt != amt or amt in (float("inf"), float("-inf")):
+        return None, "金额必须是有限数字"
+    lo, hi = _amount_range()
+    if amt < lo:
+        return None, f"金额不能低于 {lo}"
+    if amt > hi:
+        return None, f"金额不能高于 {hi}"
+    amt = round(amt, 2)
+    return (amt, _custom_days(amt), f"自定义赞助 {amt:g}"), ""
+
+
+def _render_qr_text(tpl: str, amount: float) -> str:
+    """把收款码内容模板里的占位符替换成**服务端解析过的金额**。
+
+    {amount}  → 50 / 4.99（{amount:g}，去掉多余的 0）
+    {amount2} → 50.00 / 4.99（固定两位小数）
+
+    只做这两个白名单替换。金额来自服务端 round 过的 float，拼进去的一定为数字，
+    所以即使站长模板写得再随意，也无法借金额这个入口注入别的字符。
+    没有 {amount} 时原样返回 —— 生成的码不带金额，但至少能扫出站长的收款标识。
+    """
+    return (tpl.replace("{amount2}", f"{amount:.2f}")
+               .replace("{amount}", f"{amount:g}"))
+
+
+def _qr_config_problem():
+    """收款码这条链路当前是否**可出图**；不可出图时返回一句人话。
+
+    放在下单前做前置检查，是为了把「点了按钮只看到一张破图」变成一句明确的报错
+    —— 这类"配置缺失"最容易表现成前端静默失败。
+    """
+    kind = str(SS.get("sponsor.qr_kind") or "image")
+    if kind == "image":
+        if not str(SS.get("sponsor.pay_qr") or "").strip():
+            return "站长尚未配置收款码：请设置「收款码图片地址」，或把「收款码来源」改为 text 并填写内容"
+        return ""
+    if not str(SS.get("sponsor.qr_text") or "").strip():
+        return "站长尚未配置收款码：请填写「收款码内容 / 链接」，或把「收款码来源」改为 image 并填图片地址"
+    return ""
 
 
 def _out_trade_no() -> str:
@@ -2912,7 +3175,13 @@ async def admin_site_set(request: Request):
         return JSONResponse({"detail": "bad json"}, status_code=400)
     if not isinstance(payload, dict):
         return JSONResponse({"detail": "payload 必须是对象"}, status_code=400)
+    # 跨字段一致性：单字段 validate() 看不到「两个值之间」的关系。
+    # blocked 的键直接剔除（保留库里旧值）并计入 errors；warnings 只提示、照常写入。
+    cc = SS.cross_check(payload)
+    for _k, _m in (cc.get("blocked") or {}).items():
+        payload.pop(_k, None)
     ok, errs = {}, {}
+    errs.update(cc.get("blocked") or {})
     for k, v in payload.items():
         try:
             ok[k] = SS.set_(k, v)
@@ -2923,7 +3192,8 @@ async def admin_site_set(request: Request):
     if ok:
         audit(a["username"], "site_settings", ",".join(list(ok.keys())[:12]),
               f"updated={len(ok)} failed={len(errs)}", client_ip(request))
-    return {"status": "ok" if not errs else "partial", "updated": ok, "errors": errs}
+    return {"status": "ok" if not errs else "partial", "updated": ok, "errors": errs,
+            "warnings": cc.get("warnings") or {}}
 
 
 @app.post("/api/v1/admin/mail/test")

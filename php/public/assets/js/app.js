@@ -574,38 +574,147 @@
     }).catch(function (e) { toast(e.message || '删除失败'); });
   });
 
-  // ---------------------------------------------------------------- 赞助支付
+  // ---------------------------------------------------------------- 赞助支付（动态收款码）
+  // 统一走 /api/v1/sponsor/order：用户输入金额（或选套餐）点击后，服务端返回
+  // 「收款码图片地址」，前端只负责显示。服务端决定用哪种：
+  //   mode=alipay → 真实下单的支付宝支付二维码，轮询到账
+  //   mode=manual → 服务端按金额**实时生成**的收款码，扫码后用户自行点确认
+  var SYM = { CNY: '¥', USD: '$', EUR: '€', JPY: '¥', HKD: 'HK$' }[K.currency] || '¥';
+  var payCtx = null;
+
+  function fmtNum(v) {
+    var n = Number(v);
+    return isFinite(n) ? String(n) : '0';
+  }
+
+  function openPay(d) {
+    var m = $('#payModal');
+    if (!m) { return; }
+    m.hidden = false;
+    payCtx = { mode: d.mode, tier: d.tier || '', amount: d.amount };
+    var qr = $('#payQr');
+    if (qr) {
+      qr.innerHTML = d.url
+        ? '<img src="' + esc(d.url) + '" alt="收款二维码">'
+        : '<p class="muted">未返回收款码</p>';
+    }
+    if ($('#payAmount')) {
+      $('#payAmount').textContent = SYM + fmtNum(d.amount) + ' / ' + d.days + ' 天';
+    }
+    if ($('#payNo')) { $('#payNo').textContent = d.out_trade_no || ''; }
+    var tip = $('#payTip');
+    var cf = $('#payConfirm');
+    if (d.mode === 'manual') {
+      if ($('#payState')) { $('#payState').textContent = '等待付款'; }
+      if (tip) {
+        tip.hidden = false;
+        tip.textContent = '请扫码支付 ' + SYM + fmtNum(d.amount) + '，付款后点击下方按钮提交确认。';
+      }
+      if (cf) { cf.hidden = false; }
+      return;
+    }
+    if (tip) {
+      tip.hidden = false;
+      tip.textContent = '请用支付宝扫码支付，成功后本页面会自动更新。';
+    }
+    if (cf) { cf.hidden = true; }
+    var no = d.out_trade_no;
+    var tries = 0;
+    var t = setInterval(function () {
+      tries++;
+      req('GET', '/api/v1/sponsor/pay/' + encodeURIComponent(no)).then(function (s) {
+        if (s.paid || s.status === 'paid') {
+          clearInterval(t);
+          if ($('#payState')) { $('#payState').textContent = '支付成功！'; }
+          toast('支付成功，赞助已生效');
+          setTimeout(function () { location.reload(); }, 1200);
+        } else if (tries > 200) { clearInterval(t); }
+      }).catch(function () { if (tries > 200) { clearInterval(t); } });
+    }, K.pollMs || 3000);
+  }
+
+  function orderSponsor(body) {
+    return req('POST', '/api/v1/sponsor/order', body).then(function (d) {
+      openPay(d);
+      return d;
+    });
+  }
+
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest('[data-buy]');
     if (!b) { return; }
-    var tier = b.getAttribute('data-buy');
     b.disabled = true;
-    req('POST', '/api/v1/sponsor/pay', { tier: tier }).then(function (d) {
-      var m = $('#payModal');
-      if (!m) { return; }
-      m.hidden = false;
-      var qr = $('#payQr');
-      if (qr) {
-        if (d.qr_code) { qr.innerHTML = '<img src="' + esc(d.qr_code) + '" alt="支付二维码">'; }
-        else { qr.innerHTML = '<p class="muted">未返回二维码</p>'; }
+    orderSponsor({ tier: b.getAttribute('data-buy') })
+      .catch(function (e) { toast(e.message || '生成收款码失败', 4000); })
+      .then(function () { b.disabled = false; });
+  });
+
+  // 自定义金额：输入 → 即时校验与天数预览 → 点「生成收款码」
+  (function () {
+    var box = $('.amount-box');
+    var inp = $('#sponsorAmount');
+    var btn = $('#sponsorAmountBtn');
+    var hint = $('#sponsorAmountHint');
+    if (!box || !inp || !btn) { return; }
+    var lo = parseFloat(box.getAttribute('data-min')) || 1;
+    var hi = parseFloat(box.getAttribute('data-max')) || 99999;
+    var perDay = parseFloat(box.getAttribute('data-perday')) || 1;
+    var DEF = '输入金额后点击按钮，即可生成对应金额的收款码。也可以直接选上面的套餐。';
+
+    function sync(forceBad) {
+      var v = parseFloat(inp.value);
+      var bad = forceBad || '';
+      if (!bad && String(inp.value).trim() !== '') {
+        if (!(v > 0)) { bad = '请输入大于 0 的金额'; }
+        else if (v < lo) { bad = '金额不能低于 ' + lo; }
+        else if (v > hi) { bad = '金额不能高于 ' + hi; }
       }
-      if ($('#payNo')) { $('#payNo').textContent = d.out_trade_no || ''; }
-      var no = d.out_trade_no;
-      var tries = 0;
-      var t = setInterval(function () {
-        tries++;
-        req('GET', '/api/v1/sponsor/pay/' + encodeURIComponent(no)).then(function (s) {
-          if (s.status === 'paid') {
-            clearInterval(t);
-            if ($('#payState')) { $('#payState').textContent = '支付成功！'; }
-            toast('支付成功，赞助已生效');
-            setTimeout(function () { location.reload(); }, 1200);
-          } else if (tries > 200) { clearInterval(t); }
-        }).catch(function () { if (tries > 200) { clearInterval(t); } });
-      }, K.pollMs || 3000);
+      btn.disabled = !!bad || !(v > 0);
+      if (!hint) { return; }
+      if (bad) { hint.textContent = bad; return; }
+      if (v > 0) {
+        // 只是给用户看的预估，真正发放的天数由服务端折算
+        var days = Math.min(3650, Math.max(1, Math.floor(v / perDay)));
+        hint.textContent = '金额 ' + SYM + fmtNum(v) + '，预计发放 ' + days + ' 天赞助权益（最终以服务端为准）。';
+        return;
+      }
+      hint.textContent = DEF;
+    }
+
+    inp.addEventListener('input', function () { sync(''); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
+    });
+    btn.addEventListener('click', function () {
+      var v = parseFloat(inp.value);
+      if (!(v > 0)) { return; }
+      btn.disabled = true;
+      orderSponsor({ amount: String(v) })
+        .catch(function (e) {
+          hint && (hint.textContent = e.message || '生成收款码失败');
+          toast(e.message || '生成收款码失败', 4000);
+        })
+        .then(function () { sync(''); });
+    });
+    sync('');
+  })();
+
+  // manual 模式：用户扫码付完款后自行确认
+  document.addEventListener('click', function (ev) {
+    if (!ev.target.closest('#payConfirm')) { return; }
+    if (!payCtx) { return; }
+    var body = payCtx.tier ? { tier: payCtx.tier } : { amount: String(payCtx.amount) };
+    var btn = $('#payConfirm');
+    btn.disabled = true;
+    req('POST', '/api/v1/sponsor/claim', body).then(function (d) {
+      if ($('#payState')) {
+        $('#payState').textContent = d.status === 'ok' ? '赞助已生效' : '已提交，等待站长确认';
+      }
+      toast(d.detail || '已提交', 4000);
+      setTimeout(function () { location.reload(); }, 1500);
     }).catch(function (e) {
-      b.disabled = false;
-      toast(e.message || '下单失败', 4000);
+      btn.disabled = false;
+      toast(e.message || '提交失败', 4000);
     });
   });
 

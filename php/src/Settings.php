@@ -466,7 +466,55 @@ final class Settings
         return [true, ''];
     }
 
-    /** 批量写入：全部先校验，任一失败则整体不落库（避免半套配置）。 */
+    /**
+     * 跨字段一致性校验 —— 单字段 validate() 天生看不到「两个值之间的关系」。
+     *
+     * 与 Python 版 app/sitesettings.py::cross_check 同规则，返回：
+     *   ['blocked' => [key => 原因], 'warnings' => [key => 提示]]
+     * blocked 的键**拒绝写入**（保留库里旧值），warnings 只提示、照常写入。
+     *
+     * @param array<string,mixed> $kv 本次要写入的键值对
+     */
+    public static function crossCheck(array $kv): array
+    {
+        $blocked = [];
+        $warnings = [];
+
+        $eff = static function (string $k) use ($kv): mixed {
+            if (array_key_exists($k, $kv)) {
+                [$ok, $val, ] = self::validate($k, $kv[$k]);
+                return $ok ? $val : null;
+            }
+            return self::get($k);
+        };
+
+        // 金额区间 min <= max：写反了两个键一起拒 —— 只落一半的区间更危险
+        if (array_key_exists('sponsor.min_amount', $kv) || array_key_exists('sponsor.max_amount', $kv)) {
+            $lo = $eff('sponsor.min_amount');
+            $hi = $eff('sponsor.max_amount');
+            if ($lo !== null && $hi !== null && (int) $lo > (int) $hi) {
+                $msg = "最低金额（{$lo}）不能大于最高金额（{$hi}）";
+                $blocked['sponsor.min_amount'] = $msg;
+                $blocked['sponsor.max_amount'] = $msg;
+            }
+        }
+
+        // 来源选了动态生成，但内容为空 / 没有 {amount} —— 用户点击后要么失败、要么不带金额
+        if (array_key_exists('sponsor.qr_kind', $kv) || array_key_exists('sponsor.qr_text', $kv)) {
+            $kind = (string) ($eff('sponsor.qr_kind') ?: 'image');
+            $txt = (string) ($eff('sponsor.qr_text') ?: '');
+            if ($kind === 'text' && trim($txt) === '') {
+                $warnings['sponsor.qr_text'] = '「收款码来源」选了 text，但「收款码内容 / 链接」为空 —— '
+                    . '用户点击生成收款码时会失败，请填写内容或改回 image';
+            } elseif ($kind === 'text' && strpos($txt, '{amount}') === false) {
+                $warnings['sponsor.qr_text'] = '「收款码内容」里没有 {amount} 占位符 —— '
+                    . '生成的收款码不会带上用户输入的金额';
+            }
+        }
+
+        return ['blocked' => $blocked, 'warnings' => $warnings];
+    }
+
     public static function setMany(array $kv): array
     {
         $errors = [];
@@ -512,6 +560,10 @@ final class Settings
             'download.require_login', 'download.link_ttl_hours',
             'sponsor.enabled', 'sponsor.currency', 'sponsor.note', 'sponsor.pay_qr',
             'sponsor.contact', 'sponsor.tiers', 'sponsor.auto_approve',
+            // 动态收款码：前台要知道能不能自定义金额、区间多少、来源是图还是实时生成。
+            // sponsor.qr_text（收款内容本身）属半敏感，**不下发**。
+            'sponsor.custom_amount', 'sponsor.min_amount', 'sponsor.max_amount',
+            'sponsor.per_day_price', 'sponsor.qr_kind',
             // 支付：只暴露「是否可用」与必要的前端参数，密钥类字段绝不出门
             'pay.alipay_enabled', 'pay.auto_activate', 'pay.poll_seconds',
             'pay.order_ttl_minutes',

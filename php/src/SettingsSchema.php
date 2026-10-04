@@ -8,7 +8,7 @@
  *
  *       python3 php/scripts/gen_settings_schema.py
  *
- * 生成基准：131 项设置 / 15 个分组
+ * 生成基准：138 项设置 / 15 个分组
  */
 declare(strict_types=1);
 
@@ -145,9 +145,16 @@ final class SettingsSchema
         ['k' => 'sponsor.enabled', 'g' => 'sponsor', 't' => 'bool', 'label' => '启用赞助', 'd' => true],
         ['k' => 'sponsor.currency', 'g' => 'sponsor', 't' => 'select', 'label' => '货币单位', 'd' => 'CNY', 'opts' => '["CNY", "USD", "EUR", "JPY", "HKD"]'],
         ['k' => 'sponsor.note', 'g' => 'sponsor', 't' => 'textarea', 'label' => '赞助说明', 'd' => '赞助完全自愿。赞助后可解锁全部定制选项并享受 VIP 构建通道，但不提供任何形式的固件保证或技术支持承诺。', 'max' => 800],
-        ['k' => 'sponsor.pay_qr', 'g' => 'sponsor', 't' => 'text', 'label' => '收款码图片地址', 'd' => '', 'max' => 300],
+        ['k' => 'sponsor.pay_qr', 'g' => 'sponsor', 't' => 'text', 'label' => '收款码图片地址', 'd' => '', 'max' => 300, 'hint' => '一张固定的收款码图片（http(s):// 或 / 开头的站内路径）。当「收款码来源」选 image 时使用'],
+        ['k' => 'sponsor.qr_kind', 'g' => 'sponsor', 't' => 'select', 'label' => '收款码来源', 'd' => 'image', 'opts' => '["image", "text"]', 'hint' => 'image = 用上面的固定图片；text = 用下面的「收款码内容」实时生成（支持 {amount}）'],
+        ['k' => 'sponsor.qr_text', 'g' => 'sponsor', 't' => 'textarea', 'label' => '收款码内容 / 链接（支持 {amount}）', 'd' => '', 'max' => 1000, 'hint' => '用户输入金额点击后，服务端把 {amount} 替换成实际金额并实时生成收款码图片。可填支付宝个人收款码链接（如 https://qr.alipay.com/xxxx?amount={amount}）、云闪付收款串，或任意可被扫码识别的文本。{amount} 会被替换为纯数字金额'],
+        ['k' => 'sponsor.custom_amount', 'g' => 'sponsor', 't' => 'bool', 'label' => '允许自定义金额', 'd' => true, 'hint' => '开启后用户可在赞助页自行输入金额，点击按钮即时生成对应收款码'],
+        ['k' => 'sponsor.min_amount', 'g' => 'sponsor', 't' => 'number', 'label' => '最低金额', 'd' => 1, 'max' => 999999, 'min' => 1, 'hint' => '自定义金额的下限（含）'],
+        ['k' => 'sponsor.max_amount', 'g' => 'sponsor', 't' => 'number', 'label' => '最高金额', 'd' => 99999, 'max' => 9999999, 'min' => 1, 'hint' => '自定义金额的上限（含）；必须大于等于最低金额'],
+        ['k' => 'sponsor.per_day_price', 'g' => 'sponsor', 't' => 'number', 'label' => '自定义金额每天单价', 'd' => 0, 'max' => 99999, 'min' => 0, 'hint' => '自定义金额折算赞助天数用：天数 = 金额 ÷ 该单价。填 0 则自动取套餐里最划算（每天单价最低）的那个折算；套餐也没有时按 1 天/单位兜底'],
         ['k' => 'sponsor.contact', 'g' => 'sponsor', 't' => 'text', 'label' => '赞助后联系说明', 'd' => '', 'max' => 200],
         ['k' => 'sponsor.auto_approve', 'g' => 'sponsor', 't' => 'bool', 'label' => '允许自助确认赞助', 'd' => true, 'hint' => '关闭后需管理员在后台手动标记'],
+        ['k' => 'sponsor.custom_amount_auto', 'g' => 'sponsor', 't' => 'bool', 'label' => '自定义金额也允许自助确认', 'd' => false, 'hint' => '默认关闭。套餐金额由站长定，自助确认的风险是有界的；但自定义金额是**用户自己填**的，一旦允许自助确认，用户就能凭空给自己发任意时长。除非完全信任用户（或有线下风控），否则请保持关闭，改由后台「赞助申请」人工确认'],
         ['k' => 'sponsor.tiers', 'g' => 'sponsor', 't' => 'json', 'label' => '赞助套餐', 'd' => '[{"name": "月付赞助", "amount": 10, "days": 30, "perks": ["解锁全部定制项", "VIP 构建通道", "自定义主机名与签名"]}, {"name": "季付赞助", "amount": 26, "days": 90, "perks": ["解锁全部定制项", "VIP 构建通道", "自定义主机名与签名", "插件数量不限"]}, {"name": "年付赞助", "amount": 88, "days": 365, "perks": ["解锁全部定制项", "VIP 构建通道", "自定义主机名与签名", "插件数量不限", "优先技术支持"]}]', 'hint' => 'JSON 数组，每项含 name / amount / days / perks[]'],
         ['k' => 'pay.alipay_enabled', 'g' => 'pay', 't' => 'bool', 'label' => '启用支付宝当面付', 'd' => false, 'hint' => '开启后用户在赞助页扫码支付，服务端查单确认到账并自动置位赞助态'],
         ['k' => 'pay.alipay_app_id', 'g' => 'pay', 't' => 'text', 'label' => '应用 APPID', 'd' => '', 'max' => 64, 'hint' => '支付宝开放平台 → 应用信息 → APPID'],

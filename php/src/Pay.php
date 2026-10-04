@@ -300,7 +300,14 @@ final class Pay
         Auth::audit('pay_settled', $outTradeNo, ['username' => $done['username']]);
     }
 
-    /** 发放赞助权益（可叠加已有未过期时长）。 */
+    /**
+     * 发放赞助权益（可叠加已有未过期时长）。
+     *
+     * ★ sponsor_amount 是**累计**还是**覆盖**，决定后台「累计赞助金额」统计对不对。
+     *   Python 版 app/main.py::_activate_sponsor 写的是
+     *   `sponsor_amount=COALESCE(sponsor_amount,0)+?`（累加），这里原先直接覆盖 ——
+     *   同一个用户多次赞助时，PHP 的统计只会留下最后一笔。已按 Python 对齐。
+     */
     public static function grant(string $username, int $days, string $tierName, float $amount): void
     {
         $u = Db::one('SELECT sponsor_until FROM users WHERE username=?', [$username]);
@@ -310,8 +317,8 @@ final class Pay
         $now = microtime(true);
         $cur = (float) ($u['sponsor_until'] ?? 0);
         $base = $cur > $now ? $cur : $now;
-        Db::run('UPDATE users SET sponsor=1, sponsor_until=?, sponsor_tier=?, sponsor_amount=? '
-            . 'WHERE username=?',
+        Db::run('UPDATE users SET sponsor=1, sponsor_until=?, sponsor_tier=?, '
+            . 'sponsor_amount=COALESCE(sponsor_amount,0)+? WHERE username=?',
             [$base + $days * 86400, $tierName, $amount, $username]);
     }
 

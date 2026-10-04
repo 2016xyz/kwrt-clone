@@ -847,11 +847,36 @@
 
         <div class="tier-grid mb-4" v-if="tiers.length">
           <button v-for="t in tiers" :key="t.name" class="tier"
-                  :class="{ on: chosenTier === t.name }" @click="chosenTier = t.name">
+                  :class="{ on: chosenTier === t.name && !String(amountRaw).trim() }"
+                  @click="pickTier(t)">
             <div class="tier-name">{{ t.name }}</div>
             <div class="tier-amount">{{ sym }}{{ t.amount }}<span> / {{ t.days }} 天</span></div>
             <ul class="tier-perks"><li v-for="p in t.perks" :key="p">{{ p }}</li></ul>
           </button>
+        </div>
+
+        <!-- ★ 自定义金额：用户输入金额 → 点击 → 服务端**实时生成**对应金额的收款码图片地址。
+             与套餐互斥：填了金额就取消套餐选中，避免"两个都给"的歧义。 -->
+        <div class="amount-box mb-4" v-if="site['sponsor.custom_amount']">
+          <label class="field-label" for="sponsorAmount">
+            自定义金额<span class="text-faint">（{{ sym }}{{ amtMin }} ~ {{ sym }}{{ amtMax }}）</span>
+          </label>
+          <div class="amount-row">
+            <span class="amount-sym">{{ sym }}</span>
+            <input id="sponsorAmount" class="input" type="number" inputmode="decimal"
+                   step="0.01" :min="amtMin" :max="amtMax"
+                   v-model="amountRaw" @input="onAmountInput"
+                   :placeholder="'请输入 ' + amtMin + ' ~ ' + amtMax + ' 之间的金额'">
+            <button class="btn btn-ghost btn-sm" type="button"
+                    v-if="String(amountRaw).trim()" @click="clearAmount">清除</button>
+          </div>
+          <p class="field-hint" v-if="amountErr" style="color:var(--danger,#dc2626)">{{ amountErr }}</p>
+          <p class="field-hint" v-else-if="amountDays">
+            预计发放 <b>{{ amountDays }}</b> 天赞助权益（最终以服务端为准）。
+          </p>
+          <p class="field-hint" v-else>
+            也可以不填金额，直接选上面的套餐。
+          </p>
         </div>
 
         <div class="stack-sm" v-if="!user.logged_in">
@@ -862,12 +887,14 @@
         <div class="stack-sm" v-else-if="payOrder">
           <div class="qr-panel">
             <div class="qr-frame">
-              <img :src="payOrder.qr_img" :alt="'支付宝支付二维码 ' + payOrder.out_trade_no">
+              <img :src="payOrder.qr_img"
+                   :alt="(payOrder.mode === 'alipay' ? '支付宝支付二维码 ' : '收款二维码 ') + (payOrder.out_trade_no || payOrder.amount)">
             </div>
             <div class="qr-meta">
               <div class="qr-amount">{{ sym }}{{ payOrder.amount }}<small> / {{ payOrder.days }} 天</small></div>
               <div class="qr-status">
                 <span class="badge badge-dot badge-pulse badge-warning" v-if="payOrder.state === 'waiting'">等待支付</span>
+                <span class="badge badge-dot badge-info" v-else-if="payOrder.state === 'unpaid'">等待付款</span>
                 <span class="badge badge-dot badge-success" v-else-if="payOrder.state === 'paid'">支付成功</span>
                 <span class="badge badge-dot badge-warning" v-else-if="payOrder.state === 'pending'">待管理员确认</span>
                 <span class="badge badge-dot badge-danger" v-else-if="payOrder.state === 'expired'">已超时</span>
@@ -875,28 +902,38 @@
               </div>
             </div>
           </div>
-          <div class="alert alert-info" style="display:block">
+
+          <div class="alert alert-info" style="display:block" v-if="payOrder.mode === 'alipay'">
             请用<b>支付宝</b>扫码支付，成功后本页面会自动更新。
           </div>
+          <div class="alert alert-info" style="display:block" v-else>
+            请扫码支付 <b>{{ sym }}{{ payOrder.amount }}</b>，付款后点击下面的按钮提交确认。
+          </div>
+
+          <button class="btn btn-primary btn-lg btn-block" v-if="payOrder.mode !== 'alipay'"
+                  :class="{ 'is-loading': claiming }"
+                  :disabled="payOrder.state === 'pending' || payOrder.state === 'paid'"
+                  @click="doClaim">
+            {{ payOrder.state === 'paid' ? '赞助已生效'
+               : (payOrder.state === 'pending' ? '已提交，等待站长确认' : '我已完成赞助，提交确认') }}
+          </button>
+
           <div class="row-between">
-            <span class="fs-xs text-faint break-all">订单号 {{ payOrder.out_trade_no }}</span>
+            <span class="fs-xs text-faint break-all" v-if="payOrder.out_trade_no">订单号 {{ payOrder.out_trade_no }}</span>
+            <span class="fs-xs text-faint" v-else>{{ payOrder.tier || '赞助' }} · {{ sym }}{{ payOrder.amount }}</span>
             <button class="btn btn-outline btn-sm" @click="closeSponsor">
-              {{ payOrder.state === 'paid' ? '完成' : '取消订单' }}
+              {{ payOrder.state === 'paid' ? '完成' : '关闭' }}
             </button>
           </div>
         </div>
 
         <div class="stack-sm" v-else>
-          <button class="btn btn-accent btn-lg btn-block" v-if="pay.available"
-                  :disabled="!chosenTier" :class="{ 'is-loading': paying }" @click="startPay">
-            支付宝扫码支付
+          <button class="btn btn-accent btn-lg btn-block"
+                  :disabled="!canSubmit" :class="{ 'is-loading': paying }" @click="startOrder">
+            {{ pay.available ? '支付宝扫码支付' : '生成收款码' }}
           </button>
-          <button class="btn btn-primary btn-lg btn-block" v-else
-                  :disabled="!chosenTier" :class="{ 'is-loading': claiming }" @click="doClaim">
-            我已完成赞助，提交确认
-          </button>
-          <p class="fs-xs text-faint text-center" v-if="!pay.available">
-            站点未开启在线支付，请按站长说明完成赞助后回到这里确认。
+          <p class="fs-xs text-faint text-center">
+            点击后由服务端按所选金额<b>实时生成</b>收款码图片。
           </p>
         </div>
 

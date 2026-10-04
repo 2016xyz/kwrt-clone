@@ -423,7 +423,11 @@ def qr_png_bytes(text: str, size: int = 320) -> bytes:
     q.make(fit=True)
     m = q.get_matrix()
     n = len(m)
-    scale = max(1, int(size) // n)
+    # ★ 每个模块至少 MIN_MODULE_PX 像素。密集码（版本 15 以上，如很长的收款链接）
+    #   在 320px 目标下只能分到 3–4 px/模块，实测那正是扫码器最容易失败的临界带。
+    #   宁可输出大一点的图，也不要给用户一张"看着清楚、就是扫不出来"的二维码。
+    #   （PHP 版 php/src/Qr.php 用同一常量、同一策略。）
+    scale = max(6, int(size) // n)
     dim = n * scale
 
     # 逐行拼原始扫描线：每行开头一个 filter type（0 = None），

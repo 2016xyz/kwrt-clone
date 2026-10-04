@@ -18,8 +18,10 @@ use Kwrt\Download;
 use Kwrt\Net;
 use Kwrt\Pages;
 use Kwrt\Pay;
+use Kwrt\Qr;
 use Kwrt\Releases;
 use Kwrt\Settings;
+use Kwrt\Sponsor;
 use Kwrt\Util;
 use Kwrt\View;
 
@@ -149,7 +151,145 @@ final class ApiController
                   'enabled' => Settings::bool('sponsor.enabled', true),
                   'currency' => (string) Settings::get('sponsor.currency', 'CNY'),
                   'note' => (string) Settings::get('sponsor.note', ''),
-                  'pay_qr' => (string) Settings::get('sponsor.pay_qr', '')]);
+                  'pay_qr' => (string) Settings::get('sponsor.pay_qr', ''),
+                  // 动态收款码的前端参数（与 Python /api/v1/sponsor/tiers 对齐）：
+                  // 前端据此决定是否画金额输入框、区间多少、按钮写"生成收款码"还是"扫码支付"。
+                  'custom_amount' => Settings::bool('sponsor.custom_amount', true),
+                  'min_amount' => Sponsor::amountRange()[0],
+                  'max_amount' => Sponsor::amountRange()[1],
+                  'qr_kind' => (string) (Settings::get('sponsor.qr_kind', 'image') ?: 'image'),
+                  'pay_available' => Pay::available()]);
+    }
+
+    /**
+     * 统一下单入口 —— 用户输入金额（或选套餐）点击后调用。
+     * 与 Python /api/v1/sponsor/order 对齐：
+     *   mode=alipay 有当面付 → 真实下单，url 指向该订单的二维码
+     *   mode=manual 没有当面付 → url 指向服务端**实时生成**的收款码图片
+     */
+    public function sponsorOrder(array $p): string
+    {
+        $u = Auth::currentUser();
+        if (!$u) {
+            json_out(['status' => 'error', 'detail' => '请先登录'], 401);
+        }
+        if (!Settings::bool('sponsor.enabled', true)) {
+            json_out(['status' => 'error', 'detail' => '本站未开启赞助'], 400);
+        }
+        $tier = trim((string) input('tier', ''));
+        $amount = (float) input('amount', 0);
+        [$choice, $err] = Sponsor::resolve($tier, $amount);
+        if ($choice === null) {
+            json_out(['status' => 'error', 'detail' => $err], 400);
+        }
+        $currency = (string) Settings::get('sponsor.currency', 'CNY');
+
+        if (Pay::available()) {
+            $out = Pay::precreate((string) $u['username'], (string) $choice['tier'],
+                (float) $choice['amount'], (int) $choice['days']);
+            if (!$out['ok']) {
+                json_out(['status' => 'error', 'detail' => $out['detail']], 502);
+            }
+            json_out([
+                'status' => 'ok',
+                'mode' => 'alipay',
+                'out_trade_no' => $out['out_trade_no'],
+                'url' => Net::url('/api/v1/sponsor/pay/' . rawurlencode((string) $out['out_trade_no']) . '/qr.png'),
+                'amount' => $choice['amount'],
+                'days' => $choice['days'],
+                'tier' => $choice['tier'],
+                'currency' => $currency,
+                'expires_in' => max(0, (int) $out['expires'] - time()),
+            ]);
+        }
+
+        $problem = Sponsor::qrConfigProblem();
+        if ($problem !== '') {
+            json_out(['status' => 'error', 'detail' => $problem], 503);
+        }
+        json_out([
+            'status' => 'ok',
+            'mode' => 'manual',
+            'url' => Net::url('/api/v1/sponsor/qr.png?amount=' . rawurlencode(Sponsor::num((float) $choice['amount']))),
+            'qr_kind' => (string) (Settings::get('sponsor.qr_kind', 'image') ?: 'image'),
+            'amount' => $choice['amount'],
+            'days' => $choice['days'],
+            'tier' => $choice['tier'],
+            'currency' => $currency,
+            'self_confirm' => Settings::bool('sponsor.custom_amount_auto', false) || $tier !== '',
+        ]);
+    }
+
+    /**
+     * ★「收款码图片地址」的服务端入口 —— 用户输入金额点击后，前端把它当图片加载。
+     *   kind=image → 302 跳到站长填的固定图片地址；
+     *   kind=text  → 把 {amount} 替换进站长填的内容，用 Qr 实时出 PNG。
+     *
+     * 这里**必须自己画图**而不是跳外部二维码接口：收款内容含站长的收款标识，
+     * 交给第三方等于把收款信息送给别人。
+     */
+    public function sponsorQr(array $p): string
+    {
+        $u = Auth::currentUser();
+        if (!$u) {
+            http_response_code(401);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => '请先登录'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $amount = (float) input('amount', 0);
+        if (!is_finite($amount) || $amount <= 0) {
+            http_response_code(400);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => '缺少金额参数'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        [$lo, $hi] = Sponsor::amountRange();
+        if ($amount < $lo || $amount > $hi) {
+            http_response_code(400);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => "金额需在 {$lo} ~ {$hi} 之间"],
+                JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $amount = round($amount, 2);
+
+        $kind = (string) (Settings::get('sponsor.qr_kind', 'image') ?: 'image');
+        if ($kind === 'image') {
+            $url = trim((string) Settings::get('sponsor.pay_qr', ''));
+            if ($url === '') {
+                http_response_code(404);
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['status' => 'error', 'detail' => '站长尚未配置收款码图片地址'],
+                    JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            header('Location: ' . $url, true, 302);
+            exit;
+        }
+
+        $tpl = trim((string) Settings::get('sponsor.qr_text', ''));
+        if ($tpl === '') {
+            http_response_code(404);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => '站长尚未配置收款码内容 / 链接'],
+                JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        try {
+            $png = Qr::png(Sponsor::renderQrText($tpl, $amount));
+        } catch (\Throwable $ex) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'detail' => '收款码生成失败：' . $ex->getMessage()],
+                JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        header('Content-Type: image/png');
+        header('Content-Length: ' . strlen($png));
+        header('Cache-Control: private, max-age=300');
+        echo $png;
+        exit;
     }
 
     public function payInfo(array $p): string
@@ -785,47 +925,45 @@ final class ApiController
             json_out(['status' => 'error', 'detail' => '请先登录'], 401);
         }
         $tierName = trim((string) input('tier', ''));
-        $tiers = Settings::get('sponsor.tiers', []);
-        if (is_string($tiers)) {
-            $tiers = json_decode($tiers, true) ?: [];
+        $reqAmount = (float) input('amount', 0);
+        // ★ 金额与天数的真值一律由 Sponsor::resolve() 决定：
+        //     选套餐 → 用套餐里的 amount/days，前端传什么都不看；
+        //     自定义金额 → amount 取用户的申报值（要的就是这个），
+        //                  **days 由服务端按单价折算**，前端无权指定。
+        [$choice, $err] = Sponsor::resolve($tierName, $reqAmount);
+        if ($choice === null) {
+            json_out(['status' => 'error', 'detail' => $err], 400);
         }
-        $found = null;
-        foreach ((array) $tiers as $t) {
-            if ((string) ($t['name'] ?? '') === $tierName) {
-                $found = $t;
-                break;
-            }
-        }
-        if ($found === null) {
-            json_out(['status' => 'error', 'detail' => '套餐不存在'], 400);
-        }
+        $tierName = (string) $choice['tier'];
+        $days = (int) $choice['days'];
+        $amt = (float) $choice['amount'];
         $note = mb_substr(trim((string) input('note', '')), 0, 300);
         $email = trim((string) input('email', ''));
-        $days = (int) ($found['days'] ?? 30);
-        $amt = (float) ($found['amount'] ?? 0);
 
-        // ★ 尊重后台的「允许自助确认赞助」（sponsor.auto_approve）。
-        //   Python 版一直按这个开关**分流成两条完全不同的路径**（app/main.py:1754）：
-        //     auto=true  → 直接置位赞助态，**不写** sponsor_claims，立即返回权益
-        //     auto=false → 写 sponsor_claims(status=pending)，返回 pending
-        //   PHP 版原先**无条件**写 pending —— 管理员打开开关也不生效，
-        //   用户永远等审核，两版响应结构还不一样。以下按 Python 逐字段对齐。
-        $auto = Settings::bool('sponsor.auto_approve', false)
-            && in_array(Settings::get('sponsor.auto_approve'), [true, '1', 'true'], true);
+        // ★ 自助确认分两档（与 Python 对齐）：
+        //     选套餐     → 看 sponsor.auto_approve（默认开）
+        //     自定义金额 → 看 sponsor.custom_amount_auto（默认**关**）
+        //   套餐金额是站长定的，风险有界；自定义金额是用户填的，一旦允许自助
+        //   确认就等于让用户凭空给自己发任意时长。
+        $isCustom = (bool) $choice['custom'];
+        $auto = $isCustom
+            ? Settings::bool('sponsor.custom_amount_auto', false)
+            : (Settings::bool('sponsor.auto_approve', false)
+                && in_array(Settings::get('sponsor.auto_approve'), [true, '1', 'true'], true));
 
         if ($auto) {
-            $now = microtime(true);
-            $until = $now + $days * 86400;
-            Db::run('UPDATE users SET sponsor=1, sponsor_until=?, sponsor_tier=?, sponsor_amount=? '
-                . 'WHERE username=?',
-                [$until, $tierName, $amt, $u['username']]);
+            // 与 Python 的 _activate_sponsor 一致：在**未过期的剩余时长**上顺延，
+            // 并且累计 sponsor_amount（Pay::grant 与 Python 同语义）。
+            Pay::grant((string) $u['username'], $days, $tierName, $amt);
+            $after = Db::one('SELECT sponsor_until FROM users WHERE username=?', [$u['username']]);
+            $until = (float) ($after['sponsor_until'] ?? 0);
             // 与 Python 一致：邮箱为空时才补写，绝不覆盖用户已有邮箱
             if ($email !== '') {
                 Db::run("UPDATE users SET email=? WHERE username=? AND (email IS NULL OR email='')",
                     [$email, $u['username']]);
             }
             Auth::audit('sponsor_claim', (string) $u['username'],
-                ['tier' => $tierName, 'amount' => $amt, 'auto' => true]);
+                ['tier' => $tierName, 'amount' => $amt, 'days' => $days, 'auto' => true]);
             json_out(['status' => 'ok', 'sponsor' => true, 'until' => $until,
                       'detail' => '已激活赞助权益 ' . $days . ' 天']);
         }
@@ -834,8 +972,9 @@ final class ApiController
             . 'VALUES(?,?,?,?,?,?)',
             [$u['username'], $tierName, $amt, $note, 'pending', microtime(true)]);
         Auth::audit('sponsor_claim', (string) $u['username'],
-            ['tier' => $tierName, 'pending' => true]);
-        json_out(['status' => 'pending', 'detail' => '已提交，管理员确认后生效']);
+            ['tier' => $tierName, 'amount' => $amt, 'days' => $days, 'pending' => true]);
+        json_out(['status' => 'pending', 'days' => $days, 'amount' => $amt,
+                  'detail' => '已提交，管理员确认后生效（将发放 ' . $days . ' 天）']);
     }
 
     public function sponsorPay(array $p): string

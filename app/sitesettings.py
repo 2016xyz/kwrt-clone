@@ -242,10 +242,40 @@ SCHEMA = [
          d="赞助完全自愿。赞助后可解锁全部定制选项并享受 VIP 构建通道，"
            "但不提供任何形式的固件保证或技术支持承诺。",
          label="赞助说明", max=800),
-    dict(k="sponsor.pay_qr", g="sponsor", t="text", d="", label="收款码图片地址", max=300),
+    dict(k="sponsor.pay_qr", g="sponsor", t="text", d="", label="收款码图片地址", max=300,
+         hint="一张固定的收款码图片（http(s):// 或 / 开头的站内路径）。"
+              "当「收款码来源」选 image 时使用"),
+    # ★ 动态收款码：用户输入金额 → 点击 → 由服务端**实时生成**图片地址。
+    #   没有条件/资质开通支付宝当面付的站长，靠这一组设置也能收款：
+    #   把个人收款码背后的「内容/链接」填进 qr_text（支持 {amount} 占位符），
+    #   服务端在用户提交金额后把占位符替换成实际金额，再渲染成 PNG 返回。
+    dict(k="sponsor.qr_kind", g="sponsor", t="select", d="image", opts=["image", "text"],
+         label="收款码来源",
+         hint="image = 用上面的固定图片；text = 用下面的「收款码内容」实时生成（支持 {amount}）"),
+    dict(k="sponsor.qr_text", g="sponsor", t="textarea", d="", max=1000,
+         label="收款码内容 / 链接（支持 {amount}）",
+         hint="用户输入金额点击后，服务端把 {amount} 替换成实际金额并实时生成收款码图片。"
+              "可填支付宝个人收款码链接（如 https://qr.alipay.com/xxxx?amount={amount}）、"
+              "云闪付收款串，或任意可被扫码识别的文本。{amount} 会被替换为纯数字金额"),
+    dict(k="sponsor.custom_amount", g="sponsor", t="bool", d=True,
+         label="允许自定义金额",
+         hint="开启后用户可在赞助页自行输入金额，点击按钮即时生成对应收款码"),
+    dict(k="sponsor.min_amount", g="sponsor", t="number", d=1, min=1, max=999999,
+         label="最低金额", hint="自定义金额的下限（含）"),
+    dict(k="sponsor.max_amount", g="sponsor", t="number", d=99999, min=1, max=9999999,
+         label="最高金额", hint="自定义金额的上限（含）；必须大于等于最低金额"),
+    dict(k="sponsor.per_day_price", g="sponsor", t="number", d=0, min=0, max=99999,
+         label="自定义金额每天单价",
+         hint="自定义金额折算赞助天数用：天数 = 金额 ÷ 该单价。填 0 则自动取套餐里"
+              "最划算（每天单价最低）的那个折算；套餐也没有时按 1 天/单位兜底"),
     dict(k="sponsor.contact", g="sponsor", t="text", d="", label="赞助后联系说明", max=200),
     dict(k="sponsor.auto_approve", g="sponsor", t="bool", d=True,
          label="允许自助确认赞助", hint="关闭后需管理员在后台手动标记"),
+    dict(k="sponsor.custom_amount_auto", g="sponsor", t="bool", d=False,
+         label="自定义金额也允许自助确认",
+         hint="默认关闭。套餐金额由站长定，自助确认的风险是有界的；但自定义金额是"
+              "**用户自己填**的，一旦允许自助确认，用户就能凭空给自己发任意时长。"
+              "除非完全信任用户（或有线下风控），否则请保持关闭，改由后台「赞助申请」人工确认"),
     # 套餐：JSON 数组。金额与权益全由管理员定义。
     dict(k="sponsor.tiers", g="sponsor", t="json",
          d=[
@@ -676,6 +706,49 @@ def set_(key, value):
     return v
 
 
+def cross_check(payload):
+    """跨字段一致性校验。
+
+    单字段的 `validate()` 天生看不到「两个值之间的关系」，批量保存时才会暴露。
+    返回 {"blocked": {key: 原因}, "warnings": {key: 提示}}：
+      · blocked —— 该键**拒绝写入**（已存在的旧值保留），并作为错误回给后台；
+      · warnings —— 照常写入，但回一条提示，避免站长配出一个"点了没反应"的组合。
+    """
+    blocked, warnings = {}, {}
+    if not isinstance(payload, dict):
+        return {"blocked": blocked, "warnings": warnings}
+
+    def _effective(key):
+        """本次要写入的值优先，否则回落到库里的当前值。"""
+        if key in payload:
+            ok, v, _ = validate(key, payload[key])
+            return v if ok else None
+        try:
+            return get(key)
+        except Exception:
+            return None
+
+    # 金额区间：min <= max。写反了两个键一起拒，否则"只写进去一半"的区间更危险。
+    if "sponsor.min_amount" in payload or "sponsor.max_amount" in payload:
+        lo, hi = _effective("sponsor.min_amount"), _effective("sponsor.max_amount")
+        if lo is not None and hi is not None and int(lo) > int(hi):
+            msg = f"最低金额（{lo}）不能大于最高金额（{hi}）"
+            blocked["sponsor.min_amount"] = msg
+            blocked["sponsor.max_amount"] = msg
+
+    # 来源选了动态生成，但内容为空 —— 用户点击后必定 404。
+    if "sponsor.qr_kind" in payload or "sponsor.qr_text" in payload:
+        kind = str(_effective("sponsor.qr_kind") or "image")
+        txt = str(_effective("sponsor.qr_text") or "")
+        if kind == "text" and not txt.strip():
+            warnings["sponsor.qr_text"] = ("「收款码来源」选了 text，但「收款码内容 / 链接」为空 —— "
+                                           "用户点击生成收款码时会失败，请填写内容或改回 image")
+        if kind == "text" and "{amount}" not in txt:
+            warnings["sponsor.qr_text"] = ("「收款码内容」里没有 {amount} 占位符 —— "
+                                           "生成的收款码不会带上用户输入的金额")
+    return {"blocked": blocked, "warnings": warnings}
+
+
 def all_values(include_secret=False):
     """读取全部配置项（默认对敏感项掩码）。"""
     with db() as c:
@@ -704,6 +777,10 @@ def public_values():
             "download.require_login", "download.link_ttl_hours",
             "sponsor.enabled", "sponsor.currency", "sponsor.note", "sponsor.pay_qr",
             "sponsor.contact", "sponsor.tiers", "sponsor.auto_approve",
+            # 动态收款码：前台需要知道「能不能自定义金额」「区间多少」「来源是图还是实时生成」，
+            # 才能画出输入框并做即时校验。sponsor.qr_text 是收款内容本身，属半敏感，**不下发**。
+            "sponsor.custom_amount", "sponsor.min_amount", "sponsor.max_amount",
+            "sponsor.per_day_price", "sponsor.qr_kind",
             # 支付：只暴露「是否可用」与必要的前端参数，密钥类字段绝不出门
             "pay.alipay_enabled", "pay.auto_activate", "pay.poll_seconds",
             "pay.order_ttl_minutes",
