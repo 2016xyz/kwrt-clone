@@ -42,6 +42,9 @@ PKG_RE = re.compile(r"^-?[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$")
 VERSION_RE = re.compile(r"^[0-9]{1,2}\.[0-9]{1,2}(?:\.[0-9]{1,3})?$")
 # 内核版本覆盖项（可选高级项）
 KERNEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$")
+# 固件默认主机名：RFC1123 允许字母数字与 . -（不允许下划线，也不允许空标签）
+HOSTNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 
 MAX_PACKAGES = 500
 ROOTFS_MIN_MB = 64
@@ -146,6 +149,22 @@ def check_kernel(v) -> str:
     return k
 
 
+def check_hostname(v) -> str:
+    """固件默认主机名。
+
+    ★ 这个键一直在 ALLOWED_KEYS 里，PHP 侧（Engine::injectDefaults）也真的
+      会写进 uci-defaults，但 Python 侧此前**只白名单、不校验、不使用** ——
+      单独用 API 传 hostname 的用户拿到的固件主机名根本没变（静默失效）。
+      现在两侧一致：都写进 uci-defaults 的 `uci set system.@system[0].hostname=`。
+    """
+    h = (v or "").strip()
+    if not h:
+        return ""
+    if len(h) > 63 or not HOSTNAME_RE.fullmatch(h):
+        raise BuildParamError("主机名不合法（仅字母数字、-、. ，每段不超过 63 位）")
+    return h
+
+
 def check_bool(v) -> bool:
     if isinstance(v, bool):
         return v
@@ -161,8 +180,13 @@ ALLOWED_KEYS = {
     "defaults", "filesystem", "rootfs_size_mb", "efi", "vmdk", "image_type",
     "kernel_v", "wanlan", "usb_net", "usb_wireless", "https_backend",
     "expose_ports", "quick_url", "ipv6", "dhcp", "eflasher", "diff_packages",
-    "files_path", "hostname", "signature", "email", "more", "settings",
+    "files_path", "hostname", "email",
 }
+# ★ 从白名单里删掉的三个键：`signature` / `more` / `settings`。
+#   它们原先被接受、被原样存进 payload，但**两版后端、GH Actions 的
+#   workflow_dispatch 入参、前端表单里都没有任何一处消费它们** ——
+#   即「API 声称支持、实际静默忽略」。白名单只留真正会被用到的键。
+#   （`email` 保留：main.py 会把它写进队列 meta，用于构建完成通知。）
 
 
 def sanitize(req: dict) -> dict:
@@ -190,6 +214,8 @@ def sanitize(req: dict) -> dict:
         out["rootfs_size_mb"] = check_rootfs(out["rootfs_size_mb"])
     if out.get("kernel_v"):
         out["kernel_v"] = check_kernel(out["kernel_v"])
+    if out.get("hostname"):
+        out["hostname"] = check_hostname(out["hostname"])
 
     # 自定义文件包路径：只允许 uploads 下的相对路径形态，绝不含 .. 或绝对路径
     fp = str(out.get("files_path") or "").strip()
@@ -205,7 +231,8 @@ def sanitize(req: dict) -> dict:
         out["files_path"] = "/".join(parts)
 
     # 自由文本字段：只做长度与类型约束，内容不进入 shell/make
-    for k in ("hostname", "signature", "quick_url"):
+    # （hostname 已由 check_hostname() 单独按 RFC1123 校验，不在这里放宽到 200 字符）
+    for k in ("quick_url",):
         if out.get(k) is not None:
             v = str(out[k])
             if len(v) > 200:

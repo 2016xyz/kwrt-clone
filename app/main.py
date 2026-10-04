@@ -285,9 +285,14 @@ def _serve_page(filename: str, request=None, with_entry: bool = False) -> HTMLRe
     # ---- PWA 注入：manifest 链接 + Service Worker 注册 ----
     # 缺了这两行，「添加到主屏幕」拿不到图标与名称、断网也没有兜底页。
     if bool(SS.get("entry.pwa_enabled")):
+        # 主题色虽然经 schema 的 color 类型校验（只允许 #RGB/#RRGGBB），
+        # 但仍按「进 HTML 一律转义」的规矩再转一次 —— 纵深防御，
+        # 也避免将来有人把这条设置的校验放宽后这里变成注入口。
+        theme_color = html.escape(str(SS.get("entry.pwa_theme_color") or "#2563eb"),
+                                  quote=True)
         head = ('<link rel="manifest" href="/manifest.webmanifest">'
                 '<meta name="theme-color" content="'
-                + str(SS.get("entry.pwa_theme_color") or "#2563eb") + '">')
+                + theme_color + '">')
         html_text = html_text.replace("</head>", head + "</head>", 1)
         html_text = html_text.replace("</body>", """<script>
 if ('serviceWorker' in navigator) {
@@ -372,15 +377,27 @@ def _entry_block() -> str:
         apk = str(SS.get("entry.app_android_url") or "")
         ios = str(SS.get("entry.app_ios_url") or "")
         qr = str(SS.get("entry.app_qrcode_url") or "")
+        # ★ 这些值来自后台设置（t=text，只校验长度、不校验字符），
+        #   而下面要拼进 HTML 与属性里 —— 一律先转义再拼。
+        #   实测（修复前）：把「App 名称」填成 <img src=x onerror=alert(1)>
+        #   会直接注入每一页；填一个含双引号的名字还会把页面结构撑坏。
+        #   下面 wechat 分支一直是转义的，同一函数里两套写法，属于漏改。
+        name_h = html.escape(name)
+        desc_h = html.escape(desc)
+        qr_h = html.escape(qr, quote=True)
+        apk_h = html.escape(apk, quote=True)
+        ios_h = html.escape(ios, quote=True)
         links = ""
         if apk:
-            links += f'<a class="btn btn-primary" href="{apk}" rel="noopener">Android 下载 APK</a> '
+            links += (f'<a class="btn btn-primary" href="{apk_h}" '
+                      f'rel="noopener">Android 下载 APK</a> ')
         if ios:
-            links += f'<a class="btn" href="{ios}" rel="noopener">iPhone / iPad 下载</a>'
-        qrimg = (f'<img src="{qr}" alt="App 下载二维码">' if qr
-                 else f"<div class='qr' data-qr='{apk or ios}'></div>")
+            links += (f'<a class="btn" href="{ios_h}" '
+                      f'rel="noopener">iPhone / iPad 下载</a>')
+        qrimg = (f'<img src="{qr_h}" alt="App 下载二维码">' if qr
+                 else f"<div class='qr' data-qr='{apk_h or ios_h}'></div>")
         out += ('<div class="entry-modal" id="entry-app"><div class="entry-box">'
-                f"<h3>{name}</h3><p style='color:#6b7280;font-size:13px'>{desc}</p>"
+                f"<h3>{name_h}</h3><p style='color:#6b7280;font-size:13px'>{desc_h}</p>"
                 f"{qrimg}<div style='margin-top:12px'>{links}</div>"
                 "<p style='color:#6b7280;font-size:12px'>App 即本站在 WebView 中的封装，"
                 "功能与网页版一致；也可直接在浏览器里「添加到主屏幕」。</p>"
@@ -640,10 +657,18 @@ def get_setting(key, default=None):
 
 
 def set_setting(key, value):
-    """统一配置写入入口 —— 经 schema 校验后落库。"""
+    """统一配置写入入口 —— 经 schema 校验后落库。
+
+    ★ 兜底分支只服务「不在 schema 里的历史键」。若 key 是 schema 的已知项，
+    校验失败就必须抛出去 —— 原实现无差别地把**原始值**直接写库，等于给
+    schema 校验开了后门：任何被拒的值（超范围数字、非法颜色、超长文本……）
+    都能绕过 validate() 落盘，之后再被 public_values() 或页面渲染取出来用。
+    """
     try:
         return SS.set_(key, value)
     except Exception:
+        if key in getattr(SS, "BY_KEY", {}):
+            raise
         with db() as c:
             c.execute("INSERT OR REPLACE INTO settings(key,value,updated) VALUES(?,?,?)",
                       (key, str(value), time.time()))
@@ -1773,6 +1798,14 @@ async def api_upload(request: Request, file: UploadFile = File(...),
     if not name.endswith((".zip", ".7z", ".tar.gz", ".tgz")):
         return JSONResponse({"status": "error",
                              "detail": "仅支持 .zip/.7z/.tar.gz/.tgz"}, status_code=400)
+    # ★ 白名单收了 .7z，但本机可能根本没装 7z（install.sh 的依赖清单里就没有）。
+    #   那种情况下这个包到构建时必然解压失败。与其等构建才报错，不如上传即拒 ——
+    #   用户能立刻换个格式重传，而不是等一次构建白跑。
+    if name.lower().endswith(".7z") and not builder.sevenzip_available():
+        return JSONResponse(
+            {"status": "error",
+             "detail": "本站未安装 7z，无法处理 .7z 文件包；请改用 .zip 或 .tar.gz"},
+            status_code=400)
 
     rh = re.sub(r"[^A-Za-z0-9_-]", "", (request_hash or ""))[:64]
     if rh:
@@ -4152,17 +4185,25 @@ def firmware_list(target: str = "", dev: str = ""):
                 mtime = os.path.getmtime(fp)
                 rows.append((f"/store/{h}/{n}", n, sz, mtime, h))
 
+    # ★ 这三个值全部来自 URL —— target 是路径段、dev 是查询参数、
+    #   n/u 是产物文件名与链接 —— 直接拼进 HTML 就是反射型 XSS。
+    #   实测（修复前）：GET /firmware/%3Cscript%3Ealert(1)%3C/script%3E
+    #   会原样返回 <h3>暂无 <script>alert(1)</script> 的构建产物</h3>，
+    #   而全局 CSP 里带 script-src 'unsafe-inline' —— 脚本真的会执行。
+    #   PHP 版（templates/firmware.php 用 e()）一直是转义的，这是双端不同步。
+    label = html.escape(target + (("/" + dev) if dev else ""))
     if not rows:
         return HTMLResponse(
-            f"<h3>暂无 {target}{('/' + dev) if dev else ''} 的构建产物</h3>"
+            f"<h3>暂无 {label} 的构建产物</h3>"
             f"<p>请在首页选择设备并构建。</p>")
     rows.sort(key=lambda r: r[3], reverse=True)
     li = "".join(
-        f'<li><a href="{u}">{n}</a> <small>{s / 1048576:.1f} MB · '
+        f'<li><a href="{html.escape(u, quote=True)}">{html.escape(n)}</a> '
+        f'<small>{s / 1048576:.1f} MB · '
         f'{time.strftime("%Y-%m-%d %H:%M", time.localtime(mt))}</small></li>'
         for u, n, s, mt, _h in rows)
     return HTMLResponse(
-        f"<h3>{target}{('/' + dev) if dev else ''} 固件列表</h3>"
+        f"<h3>{label} 固件列表</h3>"
         f"<p>共 {len(rows)} 个文件</p><ul>{li}</ul>")
 
 

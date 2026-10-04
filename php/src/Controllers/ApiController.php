@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Kwrt\Controllers;
 
+use Kwrt\Archive;
 use Kwrt\Auth;
 use Kwrt\Builder;
 use Kwrt\Catalog;
@@ -646,6 +647,11 @@ final class ApiController
         }
         if (!preg_match('/\\.(zip|7z|tar\\.gz|tgz)$/i', $name)) {
             json_out(['status' => 'error', 'detail' => '仅支持 .zip / .7z / .tar.gz / .tgz'], 400);
+        }
+        // ★ 与 Python 版一致：本机没装 7z 时提前拒绝 .7z，别让用户白等一次构建。
+        if (str_ends_with(strtolower($name), '.7z') && !Archive::sevenzipAvailable()) {
+            json_out(['status' => 'error',
+                      'detail' => '本站未安装 7z，无法处理 .7z 文件包；请改用 .zip 或 .tar.gz'], 400);
         }
         // 上传落盘位置：store/uploads/_staged/<user>/，绝不与产物目录混放
         $user = preg_replace('/[^A-Za-z0-9_.\\-]/', '_', (string) $u['username']) ?? 'u';

@@ -408,6 +408,51 @@ def _inside(base, path):
         return False
 
 
+_SEVENZ_CACHE = None
+
+
+def sevenzip_exe():
+    """探测可用的 7z 可执行文件（7z / 7za / 7zr），没有则返回空串。
+
+    ★ 为什么要探测而不是直接调 `7z`：`.7z` 一直挂在「支持的上传格式」里
+      （main.py 的白名单、ApiController 的报错文案都写着 .7z），但
+      本机与 install.sh 的依赖清单里**都没有 p7zip** —— 实测线上没有 7z，
+      于是 .7z 包每次解压都失败、失败又只 print 一行日志，构建照常"成功"，
+      用户以为自己上传的自定义文件进了固件，其实一个都没进去。
+    """
+    global _SEVENZ_CACHE
+    if _SEVENZ_CACHE is None:
+        _SEVENZ_CACHE = next((p for p in ("7z", "7za", "7zr") if shutil.which(p)), "")
+    return _SEVENZ_CACHE
+
+
+def sevenzip_available() -> bool:
+    return bool(sevenzip_exe())
+
+
+def _7z_entries(listing: str, archive: str):
+    """把 `7z l -slt` 的输出解析成 [(成员路径, 链接目标), ...]。
+
+    逐行扫 `Key = Value`：遇到 `Path = ` 起一条新记录，其余键归入当前记录。
+    不依赖 `----------` 分隔线的长度，也不依赖结尾空行。
+    最后丢掉「归档自身」那条记录（7z -slt 的第一个条目 Path 就是归档文件本身）。
+    """
+    recs = []
+    cur = None
+    for line in (listing or "").splitlines():
+        if line.startswith("Path = "):
+            if cur is not None:
+                recs.append(cur)
+            cur = {"path": line[7:].strip(), "link": ""}
+        elif cur is not None and ("Link = " in line) and " = " in line:
+            cur["link"] = line.split("=", 1)[1].strip()
+    if cur is not None:
+        recs.append(cur)
+    arc = os.path.abspath(archive)
+    return [(r["path"], r["link"]) for r in recs
+            if r["path"] and os.path.abspath(r["path"]) != arc]
+
+
 def _safe_extract(archive, dest):
     """安全解压自定义文件包，杜绝路径穿越（Tar-Slip）。
 
@@ -416,7 +461,7 @@ def _safe_extract(archive, dest):
       · 条目是符号链接时，后续条目可借它跳出 dest
     这里对每个条目做规范化校验，任何越界条目直接拒绝整包。
 
-    支持 .tar.gz/.tgz/.tar；其余（.zip/.7z）尝试用系统工具，失败即放弃。
+    支持 .tar.gz/.tgz/.tar/.zip；.7z 需要系统装 7z（没有则明确报错，不静默跳过）。
     """
     dest = os.path.realpath(dest)
     lower = archive.lower()
@@ -441,16 +486,34 @@ def _safe_extract(archive, dest):
         return
 
     if lower.endswith(".7z"):
-        # 没有 stdlib 支持，只能交给系统工具；解压后校验（7z 未安装时会失败）
-        tool = ["7z", "x", "-y", f"-o{dest}", archive]
+        exe = sevenzip_exe()
+        if not exe:
+            raise RuntimeError(
+                "服务器未安装 7z，无法解压 .7z 文件包（请改用 .zip / .tar.gz）")
+        # ★ 原来的「解压后再校验」是**空转的**：越界条目已经写到 dest 之外，
+        #   而校验只 os.walk(dest) —— 永远看不到它，等于没校验。
+        #   改为与 zip 分支同一套路：**先列清单校验，再解压**。
         try:
-            subprocess.run(tool, check=True, capture_output=True, timeout=300)
+            lst = subprocess.run([exe, "l", "-slt", archive],
+                                 check=True, capture_output=True, text=True,
+                                 timeout=180).stdout
+        except Exception as e:
+            raise RuntimeError(f"读取 {os.path.basename(archive)} 清单失败: {e}")
+        for nm, link in _7z_entries(lst, archive):
+            if (nm.startswith("/") or nm.startswith("\\")
+                    or re.match(r"^[A-Za-z]:", nm)
+                    or ".." in re.split(r"[/\\]", nm)):
+                raise RuntimeError(f"归档包含越界路径: {nm}")
+            if link:
+                tgt = os.path.normpath(
+                    os.path.join(dest, os.path.dirname(nm), link))
+                if not _inside(dest, tgt):
+                    raise RuntimeError(f"归档包含越界链接: {nm} -> {link}")
+        try:
+            subprocess.run([exe, "x", "-y", f"-o{dest}", archive],
+                           check=True, capture_output=True, timeout=300)
         except Exception as e:
             raise RuntimeError(f"解压 {os.path.basename(archive)} 失败: {e}")
-        for root, _dirs, names in os.walk(dest):
-            for n in names:
-                if not _inside(dest, os.path.join(root, n)):
-                    raise RuntimeError(f"归档包含越界路径: {n}")
         return
 
     with tarfile.open(archive, "r:*") as t:
@@ -475,16 +538,37 @@ def _safe_extract(archive, dest):
         t.extractall(dest)
 
 
-def write_defaults(files_dir, script):
-    """把 uci-defaults 脚本落盘到 FILES 目录。"""
-    if not script:
+def _shq(s):
+    """POSIX 单引号转义（与 PHP 的 escapeshellarg 同构）。
+
+    写进 uci-defaults 的是**要交给路由器上的 /bin/sh 执行**的脚本，
+    值必须按 shell 规则引用；这里只做引用，不做语法清洗 ——
+    入口（params.check_hostname）已经限制了字符集。
+    """
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def write_defaults(files_dir, script, hostname=""):
+    """把 uci-defaults 脚本落盘到 FILES 目录。
+
+    hostname 是构建入参里的独立字段（与 PHP 版 Engine::injectDefaults 同源）。
+    原先 Python 侧只认 `defaults` 自由文本、把白名单里的 `hostname` 整个丢掉 ——
+    用 API 单独传 hostname 的用户，固件主机名不会变。
+    """
+    hostname = str(hostname or "").strip()
+    if not script and not hostname:
         return
     d = os.path.join(files_dir, "etc", "uci-defaults")
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "zz-asu-defaults"), "w") as f:
+    p = os.path.join(d, "zz-asu-defaults")
+    with open(p, "w") as f:
         f.write("#!/bin/sh\n")
-        f.write(script.rstrip() + "\n")
-    os.chmod(os.path.join(d, "zz-asu-defaults"), 0o755)
+        if hostname:
+            f.write("uci set system.@system[0].hostname=" + _shq(hostname) + "\n")
+            f.write("uci commit system\n")
+        if script:
+            f.write(script.rstrip() + "\n")
+    os.chmod(p, 0o755)
 
 
 def parse_pkg_list(packages):
@@ -769,7 +853,7 @@ def build(req, on_progress, request_hash=None, handle=None):
     files_dir = os.path.join(ib, "files")
     shutil.rmtree(files_dir, ignore_errors=True)
     os.makedirs(files_dir, exist_ok=True)
-    write_defaults(files_dir, req.get("defaults") or "")
+    write_defaults(files_dir, req.get("defaults") or "", req.get("hostname") or "")
 
     # 自定义文件包解压覆盖
     fp = req.get("files_path") or ""
@@ -798,7 +882,19 @@ def build(req, on_progress, request_hash=None, handle=None):
             try:
                 _safe_extract(src, files_dir)
             except Exception as e:
+                # ★ 原来这里只 print 一行就继续构建 —— 用户上传的自定义文件
+                #   一个都没进固件，构建却报「完成」，属于静默失效。
+                #   解压失败必须让构建失败，并把原因回给用户。
                 print("[builder] extract files_path failed:", e, flush=True)
+                return {"status": "failed",
+                        "detail": f"自定义文件包解压失败：{e}",
+                        "stdout": "", "stderr": f"extract failed: {e}"}
+        else:
+            # files_path 明确给了、却一个候选路径都没命中：同样不能静默放过
+            print(f"[builder] files_path 未找到可用的文件包: {fp!r}", flush=True)
+            return {"status": "failed",
+                    "detail": f"自定义文件包不存在或已被清理（{fp}），请重新上传后再构建",
+                    "stdout": "", "stderr": f"files_path not found: {fp}"}
 
     # 绝对路径 + -- 结束选项解析：避免 make 把后续的 VAR=value 当目标名，
     # 也避免 cwd 变化时误取当前目录的 Makefile。

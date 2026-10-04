@@ -286,14 +286,32 @@ final class Engine
         file_put_contents($dir . '/99-kwrt', implode("\n", $lines) . "\n");
         chmod($dir . '/99-kwrt', 0755);
 
-        // 自定义文件包：解压进 rootfs 覆盖层
+        // 自定义文件包：解压进 rootfs 覆盖层。
+        // ★ 必须走 Archive::safeExtract —— 原来是裸
+        //     $this->runCmd(['tar', '-xzf', $real, '-C', $ib . '/files'], $ib);
+        //   既不校验任何归档条目（Tar-Slip：`../` 条目可写到 ImageBuilder 之外，
+        //   配合符号链接成员更可跳到任意路径 —— 构建机任意文件写入），
+        //   又只认 gzip（上传白名单里却写着 .zip / .7z，那两种必然解压失败），
+        //   而失败返回值还被忽略 —— 用户以为文件进了固件，其实没有。
+        //   Python 侧有 builder._safe_extract，这一侧一直没有。
         $fp = (string) ($this->payload['files_path'] ?? '');
         if ($fp !== '') {
             $src = Config::path('store', 'uploads', ltrim($fp, '/'));
             $real = Util::under(Config::path('store', 'uploads'), $src);
-            if ($real !== null && is_file($real)) {
-                $this->runCmd(['tar', '-xzf', $real, '-C', $ib . '/files'], $ib);
+            if ($real === null || !is_file($real)) {
+                throw new \RuntimeException('自定义文件包不存在或已被清理（'
+                    . $fp . '），请重新上传后再构建');
             }
+            $filesDir = $ib . '/files';
+            if (!is_dir($filesDir) && !@mkdir($filesDir, 0755, true) && !is_dir($filesDir)) {
+                throw new \RuntimeException('无法创建 files 目录');
+            }
+            try {
+                Archive::safeExtract($real, $filesDir);
+            } catch (\Throwable $e) {
+                throw new \RuntimeException('自定义文件包解压失败：' . $e->getMessage());
+            }
+            $this->log('已解压自定义文件包: ' . basename($real));
         }
     }
 
