@@ -1,7 +1,11 @@
 """_safe_extract 完整回归：攻击向量应全拦，合法归档应可用。"""
 import io, os, shutil, stat, sys, tarfile, tempfile, zipfile
-sys.path.insert(0, "/root/.hermes/profiles/2/workspace/kwrt-clone")
-os.chdir("/root/.hermes/profiles/2/workspace/kwrt-clone")
+# ★ 不能用开发机的绝对路径：脚本要在任意部署目录（开发机、服务器）都能跑。
+#   原先写死 sys.path.insert/os.chdir 到某个 /root/.hermes/... 路径，
+#   换台机器就 FileNotFoundError —— 一个跑不起来的回归测试等于没有。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+os.chdir(_ROOT)
 from app.builder import _safe_extract
 
 BASE = tempfile.mkdtemp(prefix="sx_")

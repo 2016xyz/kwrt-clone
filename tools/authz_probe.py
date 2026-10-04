@@ -2,7 +2,8 @@
 import json, os, subprocess, sys
 
 B = "http://127.0.0.1:8443"
-ROOT = "/root/.hermes/profiles/2/workspace/kwrt-clone"
+# 从脚本自身位置推导仓库根，别写死开发机路径（换机器会 FileNotFoundError）
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 
 

@@ -6,12 +6,13 @@
  */
 declare(strict_types=1);
 
-require '/root/kwrt-clone/php/src/helpers.php';
+$SRC = dirname(__DIR__) . '/src';
+require $SRC . '/helpers.php';
 spl_autoload_register(static function (string $c): void {
     if (!str_starts_with($c, 'Kwrt\\')) {
         return;
     }
-    $f = '/root/kwrt-clone/php/src/' . str_replace('\\', '/', substr($c, 5)) . '.php';
+    $f = $SRC . '/' . str_replace('\\', '/', substr($c, 5)) . '.php';
     if (is_file($f)) {
         require $f;
     }
