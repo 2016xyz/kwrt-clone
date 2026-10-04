@@ -228,14 +228,32 @@ def list_for(request_hash=None, username=None, include_expired=True, limit=500,
     for r in rows:
         r["expired"] = now > r["expires"]
         r["remaining"] = max(0, int(r["expires"] - now))
-        # 令牌是敏感凭据：默认只给 url，并删除 token 原文，
-        # 避免调用方以为"已脱敏"而实际仍把明文返回给终端用户。
-        # 需要展示令牌的管理端显式传 include_token=True。
+        # 前端（前台登录页「我的下载链接」、后台「下载链接」两张表）都按
+        # remaining_hours 渲染剩余有效期。这里原来只给秒，页面于是显示成
+        # 「undefined 小时」。向上取整：只剩 1 分钟也显示「1 小时」而非「0 小时」。
+        r["remaining_hours"] = int((r["remaining"] + 3599) // 3600)
+        # 产物大小：dl_tokens 表没有这列，从磁盘实取（前台表格要显示「大小」）；
+        # 文件已被清理时给 0，不编造。
+        r["size"] = 0
+        try:
+            p = resolve_path(r.get("request_hash") or "", r.get("filename") or "")
+            if p:
+                r["size"] = os.path.getsize(p)
+        except OSError:
+            pass
+        # 令牌是敏感凭据：默认不把原文交给调用方，需要执行吊销/续期的管理端
+        # 显式传 include_token=True。不管哪种模式都会给出可直接使用的 url。
+        #
+        # ★ 原实现 else 分支写的是  r["url"] = r.get("url") or ""  ——
+        #   dl_tokens 表**根本没有 url 列**，所以这里永远得到空串；而
+        #   /api/v1/downloads 又把 token 抹掉，前台登录页只能用不存在的
+        #   d.token 拼出 "/dl/t/undefined"，点下去就是 410「令牌格式错误」。
+        #   现在：url 由是否 include_token 决定，不再伪造空串。
         if include_token:
             r["url"] = "/dl/t/" + r["token"]
         else:
             r.pop("token", None)
-            r["url"] = r.get("url") or ""
+            r.pop("url", None)
     return rows
 
 

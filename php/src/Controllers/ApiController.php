@@ -521,8 +521,37 @@ final class ApiController
         if (!$u) {
             json_out(['status' => 'error', 'detail' => '请先登录'], 401);
         }
-        json_out(['status' => 'ok', 'tokens' => Download::listFor((string) $u['username']),
-                  'stats' => Download::stats()]);
+        // 只返回**当前用户自己的**令牌（SQL 按 username 过滤），并给出可直接
+        // 点击的 url —— 与 Python 版 /api/v1/downloads 的响应结构保持一致
+        // （downloads 数组，每行含 url / remaining_hours / size）。
+        // 旧实现直接回传原始行：没有 url、没有 remaining_hours / size，
+        // 前端按 d.token 拼链接、按 remaining_hours 渲染时只能得到
+        // "/dl/t/undefined" 与「undefined 小时」。
+        $now = microtime(true);
+        $out = [];
+        foreach (Download::listFor((string) $u['username'], '', true) as $t) {
+            $exp  = (float) ($t['expires'] ?? 0);
+            $rem  = max(0, (int) $exp - (int) $now);
+            $path = Download::resolvePath((string) ($t['request_hash'] ?? ''),
+                                          (string) ($t['filename'] ?? ''));
+            $out[] = [
+                'request_hash'    => (string) ($t['request_hash'] ?? ''),
+                'username'        => (string) ($t['username'] ?? ''),
+                'filename'        => (string) ($t['filename'] ?? ''),
+                'created'         => (float) ($t['created'] ?? 0),
+                'expires'         => $exp,
+                'hits'            => (int) ($t['hits'] ?? 0),
+                'max_hits'        => (int) ($t['max_hits'] ?? 0),
+                'revoked'         => (int) ($t['revoked'] ?? 0),
+                'expired'         => $exp <= $now,
+                'remaining'       => $rem,
+                'remaining_hours' => (int) (($rem + 3599) / 3600),
+                'size'            => ($path !== null && is_file($path)) ? (int) filesize($path) : 0,
+                'url'             => Net::url('/dl/t/' . (string) ($t['token'] ?? '')),
+            ];
+        }
+        json_out(['status' => 'ok', 'count' => count($out), 'downloads' => $out,
+                  'tokens' => $out, 'stats' => Download::stats()]);
     }
 
     /** 静态镜像中转：只允许跳到固定的官方镜像域名，杜绝开放重定向。 */

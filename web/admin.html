@@ -844,8 +844,8 @@
                     <td data-label="构建" class="mono fs-xs">{{ (t.request_hash || '').slice(0, 8) }}</td>
                     <td data-label="用户">{{ t.username || '匿名' }}</td>
                     <td data-label="剩余有效期">
-                      <span class="badge" :class="t.expired ? 'badge-danger' : (t.remaining_hours < 6 ? 'badge-warning' : 'badge-success')">
-                        {{ t.expired ? '已过期' : (t.remaining_hours + ' 小时') }}</span></td>
+                      <span class="badge" :class="t.expired ? 'badge-danger' : ((t.remaining_hours || 0) < 6 ? 'badge-warning' : 'badge-success')">
+                        {{ t.expired ? '已过期' : ((t.remaining_hours || 0) + ' 小时') }}</span></td>
                     <td data-label="下载次数">{{ t.hits || 0 }}<span class="text-faint" v-if="t.max_hits">/{{ t.max_hits }}</span></td>
                     <td data-label="状态">
                       <span class="badge badge-danger" v-if="t.revoked">已吊销</span>

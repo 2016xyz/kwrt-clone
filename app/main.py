@@ -2072,9 +2072,18 @@ def api_my_downloads(request: Request):
     u = current_user(request)
     if not u:
         return JSONResponse({"detail": "请先登录"}, status_code=401)
-    rows = dl.list_for(username=u["username"], include_expired=False, limit=200)
+    # ★ 这里必须 include_token=True：SQL 已按 username 过滤，返回的本来就
+    #   是**当前登录用户自己的**令牌，页面要有可点击的链接才能下载。
+    #   旧代码用默认的 include_token=False，token 被抹掉、url 是空串，
+    #   前台登录页只能用不存在的 d.token 拼出 "/dl/t/undefined"，
+    #   点「下载」就得到 410「令牌格式错误」。
+    #   令牌原文仍然不回传给前端，只给组装好的 url。
+    rows = dl.list_for(username=u["username"], include_expired=False, limit=200,
+                       include_token=True)
+    base = _download_base()
     for r in rows:
-        r.pop("token", None)                  # 不回传令牌原文（防越权复制）
+        r["url"] = base + (r.get("url") or "")
+        r.pop("token", None)
     return {"count": len(rows), "downloads": rows}
 
 
@@ -3042,6 +3051,13 @@ def admin_overview(request: Request):
         n_fail = c.execute("SELECT COUNT(*) n FROM builds WHERE status='failed'").fetchone()["n"]
         n_prop = c.execute("SELECT COUNT(*) n FROM proposals WHERE COALESCE(status,'pending')='pending'").fetchone()["n"]
         n_bans = c.execute("SELECT COUNT(*) n FROM bans").fetchone()["n"]
+        # 后台首页「最近构建」卡片要用的列表。
+        # ★ 原实现没有这一段，而 admin.js 里写的是 d.recent_builds || []，
+        #   于是「最近构建」永远渲染成「暂无构建记录」——接口有页面、页面没数据，
+        #   是很典型的「静默半成品」。这里按创建时间倒序取最近 8 条。
+        recent = [dict(r) for r in c.execute(
+            "SELECT request_hash, target, profile, status, created FROM builds "
+            "ORDER BY created DESC LIMIT 8")]
     running = [j for j in q.jobs.values() if j.get("status") in ("started", "running")]
     queued = [j for j in q.jobs.values() if j.get("status") == "queued"]
     # 磁盘（构建健康的真实指标）
@@ -3071,6 +3087,7 @@ def admin_overview(request: Request):
         "disk": {"free_mb": round(disk_free), "store_mb": store_mb},
         "sponsor": sponsor_stats(),
         "download": dl.stats(),
+        "recent_builds": recent,
         "backend": backends.info(),
         "config": conf,
         "versions": releases_info(),

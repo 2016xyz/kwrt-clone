@@ -323,16 +323,20 @@
           <table class="table table-responsive">
             <thead><tr><th>文件</th><th>剩余有效期</th><th class="num">大小</th><th></th></tr></thead>
             <tbody>
-              <tr v-for="d in dls" :key="d.token || d.filename">
+              <tr v-for="d in dls" :key="d.url || (d.request_hash + '/' + d.filename)">
                 <td data-label="文件" class="truncate" style="max-width:280px">{{ d.filename }}</td>
                 <td data-label="剩余有效期">
-                  <span class="badge" :class="d.remaining_hours < 6 ? 'badge-warning' : 'badge-success'">
-                    {{ d.remaining_hours }} 小时
+                  <span class="badge" :class="(d.remaining_hours || 0) < 6 ? 'badge-warning' : 'badge-success'">
+                    {{ d.remaining_hours || 0 }} 小时
                   </span>
                 </td>
                 <td data-label="大小" class="num">{{ K.bytes(d.size) }}</td>
                 <td class="actions">
-                  <a class="btn btn-sm btn-outline" :href="'/dl/t/' + d.token">下载</a>
+                  <!-- ★ 原来写的是 :href="'/dl/t/' + d.token"，
+                       但 /api/v1/downloads 从不下发 token → 拼出 /dl/t/undefined
+                       → 点下去 410「令牌格式错误」。改用后端给的 url。 -->
+                  <a v-if="d.url" class="btn btn-sm btn-outline" :href="d.url">下载</a>
+                  <span v-else class="fs-xs text-faint">链接不可用</span>
                 </td>
               </tr>
             </tbody>
